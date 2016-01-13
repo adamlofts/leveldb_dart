@@ -52,38 +52,23 @@ Dart_Handle HandleError(Dart_Handle handle) {
 
 
 void DBOpen(Dart_NativeArguments arguments) {
-  Dart_EnterScope();
-
   Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
+
+  void *peer;
+  Dart_Handle key_handle = Dart_GetNativeStringArgument(arguments, 1, &peer);
+  const char* path;
+  Dart_Handle result = Dart_StringToCString(key_handle, &path);
 
   leveldb::DB* db;
   leveldb::Options options;
   options.create_if_missing = true;
-  leveldb::Status status = leveldb::DB::Open(options, "/tmp/testdb", &db);
+  leveldb::Status status = leveldb::DB::Open(options, path, &db);
   assert(status.ok());
 
-  Dart_Handle result =  Dart_SetNativeInstanceField(arg, 0, (intptr_t) db);
+  result =  Dart_SetNativeInstanceField(arg, 0, (intptr_t) db);
   printf("Address of x1 is %p\n", (void *)db);
 
   Dart_SetReturnValue(arguments, Dart_NewBoolean(true));
-  Dart_ExitScope();
-}
-
-
-void DBPut(Dart_NativeArguments arguments) {
-    Dart_EnterScope();
-
-    Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
-    intptr_t ptr;
-    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
-
-    printf("Address of x is %p\n", (void *)ptr);
-    leveldb::Status s;
-    leveldb::DB* db = (leveldb::DB*) ptr;
-    s = db->Put(leveldb::WriteOptions(), "v1", "v2");
-
-    Dart_SetReturnValue(arguments, Dart_NewBoolean(true));
-    Dart_ExitScope();
 }
 
 
@@ -92,14 +77,58 @@ void DBGet(Dart_NativeArguments arguments) {
     intptr_t ptr;
     Dart_Handle result =  Dart_GetNativeInstanceField(arg, 0, &ptr);
 
+    void *peer;
+    Dart_Handle key_handle = Dart_GetNativeStringArgument(arguments, 1, &peer);
+    const char* key_str;
+    result = Dart_StringToCString(key_handle, &key_str);
+
     leveldb::Status s;
     leveldb::DB* db = (leveldb::DB*) ptr;
     std:string value;
-    s = db->Get(leveldb::ReadOptions(), "v1", &value);
+    s = db->Get(leveldb::ReadOptions(), key_str, &value);
 
     Dart_SetReturnValue(arguments, Dart_NewStringFromCString(value.c_str()));
 }
 
+void DBPut(Dart_NativeArguments arguments) {
+    Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
+    intptr_t ptr;
+    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
+
+    void *peer;
+    Dart_Handle key_handle = Dart_GetNativeStringArgument(arguments, 1, &peer);
+    Dart_Handle value_handle = Dart_GetNativeStringArgument(arguments, 2, &peer);
+
+    const char* key_str;
+    const char* value_str;
+
+    result = Dart_StringToCString(key_handle, &key_str);
+    result = Dart_StringToCString(value_handle, &value_str);
+
+    leveldb::Status s;
+    leveldb::DB* db = (leveldb::DB*) ptr;
+    s = db->Put(leveldb::WriteOptions(), key_str, value_str);
+
+    Dart_SetReturnValue(arguments, Dart_Null());
+}
+
+void DBDelete(Dart_NativeArguments arguments) {
+    Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
+    intptr_t ptr;
+    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
+
+    void *peer;
+    Dart_Handle key_handle = Dart_GetNativeStringArgument(arguments, 1, &peer);
+
+    const char* key_str;
+    result = Dart_StringToCString(key_handle, &key_str);
+
+    leveldb::Status s;
+    leveldb::DB* db = (leveldb::DB*) ptr;
+    s = db->Delete(leveldb::WriteOptions(), key_str);
+
+    Dart_SetReturnValue(arguments, Dart_Null());
+}
 
 void DBNewIterator(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
@@ -113,8 +142,6 @@ void DBNewIterator(Dart_NativeArguments arguments) {
     Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
     result =  Dart_SetNativeInstanceField(arg1, 0, (intptr_t) it);
 
-    printf("Address of iterator is %p\n", (void *)it);
-
     Dart_SetReturnValue(arguments, Dart_Null());
 }
 
@@ -123,8 +150,6 @@ void IteratorSeek(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
     intptr_t ptr;
     Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
-
-    printf("Address of iterator2 is %p\n", (void *)ptr);
 
     leveldb::Status s;
     leveldb::Iterator* it = (leveldb::Iterator*) ptr;
@@ -186,6 +211,7 @@ FunctionLookup function_list[] = {
     {"DBOpen", DBOpen},
     {"DBGet", DBGet},
     {"DBPut", DBPut},
+    {"DBDelete", DBDelete},
     {"DBNewIterator", DBNewIterator},
 
     {"IteratorSeek", IteratorSeek},

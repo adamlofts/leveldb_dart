@@ -8,19 +8,22 @@ import 'dart-ext:sample_extension';
 
 class DB extends NativeDB {
 
-  static DB open() {
+  static DB open(String path) {
     DB kls = new DB();
-    _init(kls);
+    _init(kls, path);
     return kls;
   }
 
-  void put() {
-    _put(this);
+  String get(String key) {
+    return _get(this, key);
   }
 
-  String get() {
-    print(_get(this));
-    return _get(this);
+  void put(String key, String value) {
+    _put(this, key, value);
+  }
+
+  String delete(String key) {
+    return _delete(this, key);
   }
 
   LevelIterator get iterator {
@@ -29,9 +32,10 @@ class DB extends NativeDB {
     return it;
   }
 
-  static bool _init(DB kls) native 'DBOpen';
-  static String _get(DB kls) native 'DBGet';
-  static bool _put(DB kls) native 'DBPut';
+  static bool _init(DB kls, String path) native 'DBOpen';
+  static String _get(DB kls, String key) native 'DBGet';
+  static bool _put(DB kls, String key, String value) native 'DBPut';
+  static bool _delete(DB kls, String key) native 'DBDelete';
   static void _newIterator(DB kls, LevelIterator it) native "DBNewIterator";
 }
 
