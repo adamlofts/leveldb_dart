@@ -6,15 +6,10 @@ library sample_synchronous_extension;
 
 import 'dart-ext:sample_extension';
 
-// The simplest way to call native code: top-level functions.
-int systemRand() native "SystemRand";
-int noScopeSystemRand() native "NoScopeSystemRand";
-bool systemSrand(int seed) native "SystemSrand";
+class DB extends NativeDB {
 
-class Class extends NativeFieldsWrapper {
-
-  static Class open() {
-    Class kls = new Class();
+  static DB open() {
+    DB kls = new DB();
     _init(kls);
     return kls;
   }
@@ -34,17 +29,17 @@ class Class extends NativeFieldsWrapper {
     return it;
   }
 
-  static bool _init(Class kls) native 'LevelDBOpen';
-  static String _get(Class kls) native 'LevelDBGet';
-  static bool _put(Class kls) native 'LevelDBPut';
-  static void _newIterator(Class kls, LevelIterator it) native "DBNewIterator";
+  static bool _init(DB kls) native 'DBOpen';
+  static String _get(DB kls) native 'DBGet';
+  static bool _put(DB kls) native 'DBPut';
+  static void _newIterator(DB kls, LevelIterator it) native "DBNewIterator";
 }
 
 class LevelIterator extends NativeIterator {
   void seek() {
     _seek(this);
   }
-  bool valid() => _valid(this);
+  bool get valid => _valid(this);
   void next() => _next(this);
 
   String get key => _key(this);
