@@ -3,4 +3,5 @@
 pubspec.lock
 .pub
 packages
-
+.idea/workspace.xml
+.idea/tasks.xml
