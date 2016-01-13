@@ -6,10 +6,10 @@ library sample_synchronous_extension;
 
 import 'dart-ext:sample_extension';
 
-class DB extends NativeDB {
+class LevelDB extends NativeDB {
 
-  static DB open(String path) {
-    DB kls = new DB();
+  static LevelDB open(String path) {
+    LevelDB kls = new LevelDB();
     _init(kls, path);
     return kls;
   }
@@ -32,11 +32,11 @@ class DB extends NativeDB {
     return it;
   }
 
-  static bool _init(DB kls, String path) native 'DBOpen';
-  static String _get(DB kls, String key) native 'DBGet';
-  static bool _put(DB kls, String key, String value) native 'DBPut';
-  static bool _delete(DB kls, String key) native 'DBDelete';
-  static void _newIterator(DB kls, LevelIterator it) native "DBNewIterator";
+  static bool _init(LevelDB kls, String path) native 'DBOpen';
+  static String _get(LevelDB kls, String key) native 'DBGet';
+  static bool _put(LevelDB kls, String key, String value) native 'DBPut';
+  static bool _delete(LevelDB kls, String key) native 'DBDelete';
+  static void _newIterator(LevelDB kls, LevelIterator it) native "DBNewIterator";
 }
 
 class LevelIterator extends NativeIterator {
