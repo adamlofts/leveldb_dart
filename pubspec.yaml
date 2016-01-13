@@ -1,0 +1,5 @@
+name: leveldb_dart
+description: LevelDB dart bindings
+dependencies:
+dev_dependencies:
+  test: "^0.12.6"
