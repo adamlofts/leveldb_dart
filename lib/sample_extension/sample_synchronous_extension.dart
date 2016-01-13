@@ -14,17 +14,9 @@ class LevelDB extends NativeDB {
     return kls;
   }
 
-  String get(String key) {
-    return _get(this, key);
-  }
-
-  void put(String key, String value) {
-    _put(this, key, value);
-  }
-
-  String delete(String key) {
-    return _delete(this, key);
-  }
+  String get(String key) => _get(this, key);
+  void put(String key, String value) { _put(this, key, value); }
+  void delete(String key) { _delete(this, key); }
 
   LevelIterator get iterator {
     LevelIterator it = new LevelIterator();
@@ -32,10 +24,10 @@ class LevelDB extends NativeDB {
     return it;
   }
 
-  static bool _init(LevelDB kls, String path) native 'DBOpen';
+  static void _init(LevelDB kls, String path) native 'DBOpen';
   static String _get(LevelDB kls, String key) native 'DBGet';
-  static bool _put(LevelDB kls, String key, String value) native 'DBPut';
-  static bool _delete(LevelDB kls, String key) native 'DBDelete';
+  static void _put(LevelDB kls, String key, String value) native 'DBPut';
+  static void _delete(LevelDB kls, String key) native 'DBDelete';
   static void _newIterator(LevelDB kls, LevelIterator it) native "DBNewIterator";
 }
 

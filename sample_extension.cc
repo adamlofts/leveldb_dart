@@ -66,9 +66,8 @@ void DBOpen(Dart_NativeArguments arguments) {
   assert(status.ok());
 
   result =  Dart_SetNativeInstanceField(arg, 0, (intptr_t) db);
-  printf("Address of x1 is %p\n", (void *)db);
 
-  Dart_SetReturnValue(arguments, Dart_NewBoolean(true));
+  Dart_SetReturnValue(arguments, Dart_Null());
 }
 
 
