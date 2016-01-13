@@ -5,3 +5,5 @@ pubspec.lock
 packages
 .idea/workspace.xml
 .idea/tasks.xml
+*.so
+*.o

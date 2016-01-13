@@ -41,3 +41,7 @@ class RandomArray {
   SendPort _newServicePort() native "RandomArray_ServicePort";
 }
 
+class DB {
+
+
+}
