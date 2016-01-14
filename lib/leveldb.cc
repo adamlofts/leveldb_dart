@@ -151,18 +151,22 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
     }
 
     if (msg == 4 &&
-        message->value.as_array.length == 5) { // put(key, value)
+        message->value.as_array.length == 6) { // put(key, value, sync)
       Dart_CObject* param3 = message->value.as_array.values[3];
       Dart_CObject* param4 = message->value.as_array.values[4];
+      Dart_CObject* param5 = message->value.as_array.values[5];
 
       if (param3->type == Dart_CObject_kTypedData &&
-        param4->type == Dart_CObject_kTypedData) {
+          param4->type == Dart_CObject_kTypedData &&
+          param5->type == Dart_CObject_kBool) {
 
         leveldb::Slice key = leveldb::Slice((const char*)param3->value.as_typed_data.values, param3->value.as_typed_data.length);
         leveldb::Slice value = leveldb::Slice((const char*)param4->value.as_typed_data.values, param4->value.as_typed_data.length);
 
         leveldb::Status s;
-        s = db->Put(leveldb::WriteOptions(), key, value);
+        leveldb::WriteOptions options;
+        options.sync = param5->value.as_bool;
+        s = db->Put(options, key, value);
 
         Dart_CObject result;
         result.type = Dart_CObject_kInt32;

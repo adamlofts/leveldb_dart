@@ -88,15 +88,16 @@ class LevelDB {
     return completer.future;
   }
 
-  Future put(Uint8List key, Uint8List value) {
+  Future put(Uint8List key, Uint8List value, { bool sync: false }) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
-    var args = new List(5);
+    var args = new List(6);
     args[0] = replyPort.sendPort;
     args[1] = 4;
     args[2] = _ptr;
     args[3] = key;
     args[4] = value;
+    args[5] = sync;
 
     replyPort.handler = (result) {
       replyPort.close();
