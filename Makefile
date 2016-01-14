@@ -5,10 +5,10 @@ all: lib/libleveldb.so
 LIBS=-lleveldb
 
 lib/leveldb.o: lib/leveldb.cc
-	g++ -fPIC  -I$(DART_SDK) -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o -std=c++11 #-m32
+	g++ -g -fPIC  -I$(DART_SDK) -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o -std=c++11 #-m32
 
 lib/libleveldb.so: lib/leveldb.o
-	gcc -shared -Wl,-soname,libleveldb.so -o lib/libleveldb.so lib/leveldb.o $(LIBS) #-m32 
+	gcc -g -shared -Wl,-soname,libleveldb.so -o lib/libleveldb.so lib/leveldb.o $(LIBS) #-m32 
 
 clean:
 	rm -f lib/*.o lib/*.so

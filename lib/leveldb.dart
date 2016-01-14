@@ -134,14 +134,20 @@ class LevelDB {
   /**
    * Iterate through the db returning (key, value) tuples.
    */
-  Stream<List<Uint8List>> getItems() {
+  Stream<List<Uint8List>> getItems({ Uint8List gt, Uint8List gte, Uint8List lt, Uint8List lte, int limit: -1, bool fillCache: true }) {
     // FIXME: Pause() implementation
     StreamController<List<Uint8List>> controller = new StreamController<List<Uint8List>>();
     RawReceivePort replyPort = new RawReceivePort();
-    List args = new List(3);
+    List args = new List(9);
     args[0] = replyPort.sendPort;
     args[1] = 6;
     args[2] = _ptr;
+    args[3] = limit;
+    args[4] = fillCache;
+    args[5] = gt == null ? gte : gt;
+    args[6] = gt == null; // Is inclusive
+    args[7] = lt == null ? lte : lt;
+    args[8] = lt == null; // Is inclusive
 
     replyPort.handler = (result) {
       if (result == null) {
@@ -167,6 +173,8 @@ class LevelDB {
   /**
    * Some pretty API below. Not stable.
    */
-  Stream<Uint8List> getKeys() => getItems().map((List<Uint8List> item) => item[0]);
-  Stream<Uint8List> getValues() => getItems().map((List<Uint8List> item) => item[1]);
+  Stream<Uint8List> getKeys({ Uint8List gt, Uint8List gte, Uint8List lt, Uint8List lte, int limit: -1, bool fillCache: true }) =>
+      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache).map((List<Uint8List> item) => item[0]);
+  Stream<Uint8List> getValues({ Uint8List gt, Uint8List gte, Uint8List lt, Uint8List lte, int limit: -1, bool fillCache: true }) =>
+      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache).map((List<Uint8List> item) => item[1]);
 }

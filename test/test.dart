@@ -25,16 +25,53 @@ void main() {
   test('LevelDB', () async {
     LevelDB db = await openTestDB();
 
-    await db.put(fromString("k"), fromString("v"));
+    await db.put(fromString("k1"), fromString("v"));
+    await db.put(fromString("k2"), fromString("v"));
 
-    expect(await db.get(fromString("k")), equals(fromString("v")));
+    expect(await db.get(fromString("k1")), equals(fromString("v")));
     List keys = await db.getKeys().toList();
     Uint8List key = keys.first;
     String keyString = UTF8.decode(key);
-    expect(keyString, equals("k"));
+    expect(keyString, equals("k1"));
 
     var v = await db.get(fromString("DOESNOTEXIST"));
     expect(v, equals(null));
+
+    // All keys
+    keys = await db.getKeys().toList();
+    expect(keys.length, equals(2));
+    keys = await db.getKeys(gte: fromString("k1")).toList();
+    expect(keys.length, equals(2));
+    keys = await db.getKeys(gt: fromString("k1")).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getKeys(gt: fromString("k0")).toList();
+    expect(keys.length, equals(2));
+
+    keys = await db.getKeys(gt: fromString("k5")).toList();
+    expect(keys.length, equals(0));
+    keys = await db.getKeys(gte: fromString("k5")).toList();
+    expect(keys.length, equals(0));
+
+    keys = await db.getKeys(limit: 1).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getKeys(lte: fromString("k2")).toList();
+    expect(keys.length, equals(2));
+    keys = await db.getKeys(lt: fromString("k2")).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getKeys(gt: fromString("k1"), lt: fromString("k2")).toList();
+    expect(keys.length, equals(0));
+
+    keys = await db.getKeys(gte: fromString("k1"), lt: fromString("k2")).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getKeys(gt: fromString("k1"), lte: fromString("k2")).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getKeys(gte: fromString("k1"), lte: fromString("k2")).toList();
+    expect(keys.length, equals(2));
 
     await db.close();
   });

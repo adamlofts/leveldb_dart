@@ -191,12 +191,72 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
     }
 
     if (msg == 6 &&
-            message->value.as_array.length == 3) { // stream()
+            message->value.as_array.length == 9) { // stream()
 
-      leveldb::Iterator* it = db->NewIterator(leveldb::ReadOptions());
-      for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      Dart_CObject* param_limit = message->value.as_array.values[3];
+      int64_t limit = -1;
+      if (param_limit->type == Dart_CObject_kInt32) {
+        limit = param_limit->value.as_int32;
+      } else if (param_limit->type == Dart_CObject_kInt64) {
+        limit = param_limit->value.as_int64;
+      }
+
+      Dart_CObject* param_fill_cache = message->value.as_array.values[4];
+      bool fill_cache = param_fill_cache->value.as_bool;
+
+      leveldb::ReadOptions options;
+      options.fill_cache = fill_cache;
+
+      leveldb::Iterator* it = db->NewIterator(options);
+
+      Dart_CObject* param_start = message->value.as_array.values[5];
+      if (param_start->type == Dart_CObject_kTypedData) {
+        leveldb::Slice start_slice = leveldb::Slice((const char*)param_start->value.as_typed_data.values, param_start->value.as_typed_data.length);
+        it->Seek(start_slice);
+
+        Dart_CObject* param_start_inclusive = message->value.as_array.values[6];
+        bool is_start_inclusive = param_start_inclusive->value.as_bool;
+        if (!is_start_inclusive && it->Valid()) {
+          // If we are pointing at start_slice and not inclusive then we need to advance by 1
+          leveldb::Slice key = it->key();
+          if (key.compare(start_slice) == 0) {
+            it->Next();
+          }
+        }
+      } else {
+        it->SeekToFirst();
+      }
+
+      Dart_CObject* param_end = message->value.as_array.values[7];
+      leveldb::Slice end_slice;
+      bool is_end_inclusive = false;
+
+      if (param_end->type == Dart_CObject_kTypedData) {
+         end_slice = leveldb::Slice((const char*)param_end->value.as_typed_data.values, param_end->value.as_typed_data.length);
+         Dart_CObject* param_end_inclusive = message->value.as_array.values[8];
+         is_end_inclusive = param_end_inclusive->value.as_bool;
+      }
+
+      int64_t count = 0;
+      while (it->Valid()) {
+        if (limit >= 0 && count >= limit) {
+          break;
+        }
+
         leveldb::Slice key = it->key();
         leveldb::Slice value = it->value();
+
+        // Check if key is equal to end slice
+        if (!end_slice.empty()) {
+
+          int cmp = key.compare(end_slice);
+          if (cmp == 0 && !is_end_inclusive) {  // key == end_slice and not inclusive
+            break;
+          }
+          if (cmp > 0) { // key > end_slice
+            break;
+          }
+        }
 
         Dart_CObject* values[2];
 
@@ -224,6 +284,9 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
         // It is OK that result is destroyed when function exits.
         // Dart_PostCObject has copied its data.
         Dart_PostCObject(reply_port_id, &result);
+
+        count += 1;
+        it->Next();
       }
 
       assert(it->status().ok());  // Check for any errors found during the scan
