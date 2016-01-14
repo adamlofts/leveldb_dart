@@ -7,12 +7,12 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 import 'package:leveldb/leveldb.dart';
 
-Future<LevelDB> openTestDB() async {
-  Directory d = new Directory('/tmp/test-level-db-dart');
+Future<LevelDB> openTestDB({int index: 0}) async {
+  Directory d = new Directory('/tmp/test-level-db-dart-$index');
   if (d.existsSync()) {
-    d.delete(recursive: true);
+    await d.delete(recursive: true);
   }
-  LevelDB db = new LevelDB('/tmp/test-level-db-dart');
+  LevelDB db = new LevelDB('/tmp/test-level-db-dart-$index');
   await db.open();
   return db;
 }
@@ -35,5 +35,20 @@ void main() {
 
     var v = await db.get(fromString("DOESNOTEXIST"));
     expect(v, equals(null));
+
+    await db.close();
+  });
+
+  test('TWO DBS', () async {
+    LevelDB db1 = await openTestDB();
+    LevelDB db2 = await openTestDB(index: 1);
+
+    await db1.put(fromString("a"), fromString("1"));
+
+    var v = await db2.get(fromString("a"));
+    expect(v, equals(null));
+
+    await db1.close();
+    await db2.close();
   });
 }
