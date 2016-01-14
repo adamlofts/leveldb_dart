@@ -1,9 +1,11 @@
 
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:leveldb_dart/sample_extension/leveldb.dart';
+import 'package:leveldb/leveldb.dart';
 
 Future<LevelDB> openTestDB() async {
   Directory d = new Directory('/tmp/test-level-db-dart');
@@ -18,11 +20,12 @@ Future<LevelDB> openTestDB() async {
 void main() {
   test('LevelDB', () async {
     LevelDB db = await openTestDB();
+
     await db.put("k", "v");
     expect(await db.get("k"), equals("v"));
-
-    await for (var v in db.getKeys()) {
-      expect(v, equals("k"));
-    }
+    List keys = await db.getKeys().toList();
+    Uint8List key = keys.first;
+    String keyString = UTF8.decode(key);
+    expect(keyString, equals("k"));
   });
 }

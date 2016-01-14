@@ -154,4 +154,7 @@ class LevelDB {
 
     return controller.stream;
   }
+
+  Stream<Uint8List> getKeys() => getItems().map((List<Uint8List> item) => item[0]);
+  Stream<Uint8List> getValues() => getItems().map((List<Uint8List> item) => item[1]);
 }
