@@ -2,12 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library sample_synchronous_extension;
+library leveldb;
 
-import 'dart-ext:sample_extension';
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
+
+import 'dart-ext:leveldb';
 
 class LevelDB {
 

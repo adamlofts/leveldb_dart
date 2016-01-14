@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:test/test.dart';
-import 'package:leveldb_dart/sample_extension/sample_synchronous_extension.dart';
+import 'package:leveldb_dart/sample_extension/leveldb.dart';
 
 Future<LevelDB> openTestDB() async {
   Directory d = new Directory('/tmp/test-level-db-dart');

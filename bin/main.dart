@@ -1,7 +1,7 @@
 
 import 'dart:async';
 
-import 'package:leveldb_dart/sample_extension/sample_synchronous_extension.dart';
+import 'package:leveldb/leveldb.dart';
 
 Future main() async {
   LevelDB db = new LevelDB("/tmp/testdb");

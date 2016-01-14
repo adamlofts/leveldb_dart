@@ -1,4 +1,4 @@
-name: leveldb_dart
+name: leveldb
 description: LevelDB dart bindings
 dependencies:
 dev_dependencies:

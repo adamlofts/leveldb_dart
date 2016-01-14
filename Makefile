@@ -1,15 +1,14 @@
 
 
-all: libsample_extension.so
+all: lib/libleveldb.so
 
 LIBS=-lleveldb
 
-sample_extension.o: sample_extension.cc
-	g++ -fPIC  -I$(DART_SDK) -DDART_SHARED_LIB -c sample_extension.cc -std=c++11 #-m32
+lib/leveldb.o: lib/leveldb.cc
+	g++ -fPIC  -I$(DART_SDK) -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o -std=c++11 #-m32
 
-libsample_extension.so: sample_extension.o
-	gcc -shared -Wl,-soname,libsample_extension.so -o libsample_extension.so sample_extension.o $(LIBS) #-m32 
-	cp libsample_extension.so lib/sample_extension/
+lib/libleveldb.so: lib/leveldb.o
+	gcc -shared -Wl,-soname,libleveldb.so -o lib/libleveldb.so lib/leveldb.o $(LIBS) #-m32 
 
 clean:
-	rm -f *.o *.so lib/sample_extension/*.so
+	rm -f lib/*.o lib/*.so
