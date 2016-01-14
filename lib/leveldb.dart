@@ -62,7 +62,7 @@ class LevelDB {
     return completer.future;
   }
 
-  Future get(String key) {
+  Future<Uint8List> get(Uint8List key) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
     var args = new List(3);
@@ -72,7 +72,9 @@ class LevelDB {
 
     replyPort.handler = (result) {
       replyPort.close();
-      if (result != null) {
+      if (result == 0) { // key not found
+        completer.complete(null);
+      } else if (result != null) {
         completer.complete(result);
       } else {
         completer.completeError(new Exception("Random array creation failed"));
@@ -82,7 +84,7 @@ class LevelDB {
     return completer.future;
   }
 
-  Future put(String key, String value) {
+  Future put(Uint8List key, Uint8List value) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
     var args = new List(4);
@@ -103,7 +105,7 @@ class LevelDB {
     return completer.future;
   }
 
-  Future delete(String key) {
+  Future delete(Uint8List key) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
     var args = new List(3);
@@ -114,7 +116,7 @@ class LevelDB {
     replyPort.handler = (result) {
       replyPort.close();
       if (result != null) {
-        completer.complete(result);
+        completer.complete();
       } else {
         completer.completeError(new Exception("Random array creation failed"));
       }
@@ -155,6 +157,9 @@ class LevelDB {
     return controller.stream;
   }
 
+  /**
+   * Some pretty API below. Not stable.
+   */
   Stream<Uint8List> getKeys() => getItems().map((List<Uint8List> item) => item[0]);
   Stream<Uint8List> getValues() => getItems().map((List<Uint8List> item) => item[1]);
 }

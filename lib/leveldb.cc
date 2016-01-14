@@ -131,16 +131,28 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
         message->value.as_array.length == 3) { // get(key)
       Dart_CObject* param2 = message->value.as_array.values[2];
 
-      if (param2->type == Dart_CObject_kString) {
-        const char* key = param2->value.as_string;
-
+      if (param2->type == Dart_CObject_kTypedData) {
+        leveldb::Slice key = leveldb::Slice((const char*)param2->value.as_typed_data.values, param2->value.as_typed_data.length);
         leveldb::Status s;
         std:string value;
         s = global_db->Get(leveldb::ReadOptions(), key, &value);
 
+        if (s.IsNotFound()) {
+          Dart_CObject result;
+          result.type = Dart_CObject_kInt32;
+          result.value.as_int32 = 0;
+          Dart_PostCObject(reply_port_id, &result);
+          return;
+        }
+
+        // FIXME: s.ok() <- raise exeception
+
         Dart_CObject result;
-        result.type = Dart_CObject_kString;
-        result.value.as_string = (char*) value.c_str();  // FIXME: Is thi sallowed?
+        result.type = Dart_CObject_kTypedData;
+        result.value.as_typed_data.type = Dart_TypedData_kUint8;
+        // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
+        result.value.as_typed_data.values = (uint8_t*) value.data();
+        result.value.as_typed_data.length = value.size();
         Dart_PostCObject(reply_port_id, &result);
         return;
       }
@@ -151,9 +163,11 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
       Dart_CObject* param2 = message->value.as_array.values[2];
       Dart_CObject* param3 = message->value.as_array.values[3];
 
-      if (param2->type == Dart_CObject_kString) {
-        const char* key = param2->value.as_string;
-        const char* value = param3->value.as_string;
+      if (param2->type == Dart_CObject_kTypedData &&
+        param2->type == Dart_CObject_kTypedData) {
+
+        leveldb::Slice key = leveldb::Slice((const char*)param2->value.as_typed_data.values, param2->value.as_typed_data.length);
+        leveldb::Slice value = leveldb::Slice((const char*)param3->value.as_typed_data.values, param3->value.as_typed_data.length);
 
         leveldb::Status s;
         s = global_db->Put(leveldb::WriteOptions(), key, value);
@@ -170,8 +184,8 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
             message->value.as_array.length == 3) { // delete(key)
       Dart_CObject* param2 = message->value.as_array.values[2];
 
-      if (param2->type == Dart_CObject_kString) {
-        const char* key = param2->value.as_string;
+      if (param2->type == Dart_CObject_kTypedData) {
+        leveldb::Slice key = leveldb::Slice((const char*)param2->value.as_typed_data.values, param2->value.as_typed_data.length);
 
         leveldb::Status s;
         s = global_db->Delete(leveldb::WriteOptions(), key);

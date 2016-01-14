@@ -17,15 +17,23 @@ Future<LevelDB> openTestDB() async {
   return db;
 }
 
+Uint8List fromString(String v) {
+  return new Uint8List.fromList(UTF8.encode(v));
+}
+
 void main() {
   test('LevelDB', () async {
     LevelDB db = await openTestDB();
 
-    await db.put("k", "v");
-    expect(await db.get("k"), equals("v"));
+    await db.put(fromString("k"), fromString("v"));
+
+    expect(await db.get(fromString("k")), equals(fromString("v")));
     List keys = await db.getKeys().toList();
     Uint8List key = keys.first;
     String keyString = UTF8.decode(key);
     expect(keyString, equals("k"));
+
+    var v = await db.get(fromString("DOESNOTEXIST"));
+    expect(v, equals(null));
   });
 }
