@@ -10,7 +10,9 @@ using namespace std;     // (or using namespace std if you want to use more of s
 #include "include/dart_native_api.h"
 
 #include "leveldb/db.h"
+#include "leveldb/filter_policy.h"
 
+const int BLOOM_BITS_PER_KEY = 10;
 
 Dart_NativeFunction ResolveName(Dart_Handle name,
                                 int argc,
@@ -83,6 +85,8 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
 
       leveldb::Options options;
       options.create_if_missing = true;
+      options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
+
       leveldb::DB* new_db;
       leveldb::Status status = leveldb::DB::Open(options, path, &new_db);
       assert(status.ok());
