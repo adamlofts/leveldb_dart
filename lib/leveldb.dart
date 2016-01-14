@@ -12,36 +12,37 @@ import 'dart-ext:leveldb';
 
 class LevelDB {
 
-  final String _path;
-
   SendPort _servicePort;
   int _ptr;
 
-  SendPort _newServicePort() native "DB_ServicePort";
+  static SendPort _newServicePort() native "DB_ServicePort";
 
-  LevelDB(String path) :
-    _path = path {
-    _servicePort = _newServicePort();
-  }
+  /**
+   * Internal constructor. Use LevelDB::open().
+   */
+  LevelDB(SendPort servicePort, int ptr) :
+    _servicePort = servicePort,
+    _ptr = ptr;
 
-  Future open() {
+  static Future<LevelDB> open(String path) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
     var args = new List(3);
     args[0] = replyPort.sendPort;
     args[1] = 1;
-    args[2] = _path;
+    args[2] = path;
 
+    SendPort servicePort = _newServicePort();
     replyPort.handler = (int result) {
       replyPort.close();
       if (result != null) {
-        _ptr = result;
-        completer.complete(result);
+        LevelDB db = new LevelDB(servicePort, result);
+        completer.complete(db);
       } else {
-        completer.completeError(new Exception("Random array creation failed"));
+        completer.completeError(new Exception("Failed to create db: FIXME: Add error."));
       }
     };
-    _servicePort.send(args);
+    servicePort.send(args);
     return completer.future;
   }
 

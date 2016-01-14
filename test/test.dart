@@ -12,9 +12,7 @@ Future<LevelDB> openTestDB({int index: 0}) async {
   if (d.existsSync()) {
     await d.delete(recursive: true);
   }
-  LevelDB db = new LevelDB('/tmp/test-level-db-dart-$index');
-  await db.open();
-  return db;
+  return (await LevelDB.open('/tmp/test-level-db-dart-$index'));
 }
 
 Uint8List fromString(String v) {
@@ -88,4 +86,5 @@ void main() {
     await db1.close();
     await db2.close();
   });
+
 }
