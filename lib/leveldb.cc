@@ -30,18 +30,6 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
     return result_code;
   }
 
-  result_code = Dart_CreateNativeWrapperClass(
-      parent_library, Dart_NewStringFromCString("NativeDB"), 1);
-  if (Dart_IsError(result_code)) {
-    return result_code;
-  }
-
-  result_code = Dart_CreateNativeWrapperClass(
-      parent_library, Dart_NewStringFromCString("NativeIterator"), 2);
-  if (Dart_IsError(result_code)) {
-    return result_code;
-  }
-
   return Dart_Null();
 }
 
@@ -53,8 +41,6 @@ Dart_Handle HandleError(Dart_Handle handle) {
   return handle;
 }
 
-// FIXME:
-bool is_closed = false;  // FIXME: Synchronized
 
 void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
 
@@ -313,6 +299,7 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
   Dart_PostCObject(reply_port_id, &result);
 }
 
+
 /**
  Creates a port representing a level db thread
 */
@@ -328,10 +315,12 @@ void dbServicePort(Dart_NativeArguments arguments) {
   Dart_ExitScope();
 }
 
+
 struct FunctionLookup {
   const char* name;
   Dart_NativeFunction function;
 };
+
 
 FunctionLookup function_list[] = {
     {"DB_ServicePort", dbServicePort},
@@ -342,6 +331,7 @@ FunctionLookup function_list[] = {
 FunctionLookup no_scope_function_list[] = {
   {NULL, NULL}
 };
+
 
 Dart_NativeFunction ResolveName(Dart_Handle name,
                                 int argc,
