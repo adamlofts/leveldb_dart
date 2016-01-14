@@ -15,6 +15,7 @@ class LevelDB {
   final String _path;
 
   SendPort _servicePort;
+  int _ptr;
 
   SendPort _newServicePort() native "DB_ServicePort";
 
@@ -31,9 +32,10 @@ class LevelDB {
     args[1] = 1;
     args[2] = _path;
 
-    replyPort.handler = (result) {
+    replyPort.handler = (int result) {
       replyPort.close();
       if (result != null) {
+        _ptr = result;
         completer.complete(result);
       } else {
         completer.completeError(new Exception("Random array creation failed"));
@@ -46,9 +48,10 @@ class LevelDB {
   Future close() {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
-    var args = new List(2);
+    var args = new List(3);
     args[0] = replyPort.sendPort;
     args[1] = 2;
+    args[2] = _ptr;
 
     replyPort.handler = (result) {
       replyPort.close();
@@ -65,10 +68,11 @@ class LevelDB {
   Future<Uint8List> get(Uint8List key) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
-    var args = new List(3);
+    var args = new List(4);
     args[0] = replyPort.sendPort;
     args[1] = 3;
-    args[2] = key;
+    args[2] = _ptr;
+    args[3] = key;
 
     replyPort.handler = (result) {
       replyPort.close();
@@ -87,11 +91,12 @@ class LevelDB {
   Future put(Uint8List key, Uint8List value) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
-    var args = new List(4);
+    var args = new List(5);
     args[0] = replyPort.sendPort;
-    args[1] = 3;
-    args[2] = key;
-    args[3] = value;
+    args[1] = 4;
+    args[2] = _ptr;
+    args[3] = key;
+    args[4] = value;
 
     replyPort.handler = (result) {
       replyPort.close();
@@ -108,10 +113,11 @@ class LevelDB {
   Future delete(Uint8List key) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
-    var args = new List(3);
+    var args = new List(4);
     args[0] = replyPort.sendPort;
-    args[1] = 4;
-    args[2] = key;
+    args[1] = 5;
+    args[2] = _ptr;
+    args[3] = key;
 
     replyPort.handler = (result) {
       replyPort.close();
@@ -132,9 +138,10 @@ class LevelDB {
     // FIXME: Pause() implementation
     StreamController<List<Uint8List>> controller = new StreamController<List<Uint8List>>();
     RawReceivePort replyPort = new RawReceivePort();
-    List args = new List(2);
+    List args = new List(3);
     args[0] = replyPort.sendPort;
-    args[1] = 5;
+    args[1] = 6;
+    args[2] = _ptr;
 
     replyPort.handler = (result) {
       if (result == null) {

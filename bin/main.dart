@@ -21,7 +21,6 @@ Future main() async {
   await db.delete(key);
 
   v = await db.get(key);
-  print(v);
 
 
 
