@@ -54,24 +54,6 @@ Dart_Handle HandleError(Dart_Handle handle) {
 // FIXME:
 bool is_closed = false;  // FIXME: Synchronized
 
-Dart_CObject* AllocateDartCObjectArray(intptr_t length) {
-  // Allocate a Dart_CObject structure followed by an array of
-  // pointers to Dart_CObject structures. The pointer to the array
-  // content is set up to this area.
-  Dart_CObject* value =
-      reinterpret_cast<Dart_CObject*>(
-          malloc(sizeof(Dart_CObject) + length * sizeof(value)));
-  assert(value != NULL);
-  value->type = Dart_CObject_kArray;
-  value->value.as_array.length = length;
-  if (length > 0) {
-    value->value.as_array.values = reinterpret_cast<Dart_CObject**>(value + 1);
-  } else {
-    value->value.as_array.values = NULL;
-  }
-  return value;
-}
-
 void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
 
   // First arg should always be the reply port.
