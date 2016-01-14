@@ -1,9 +1,10 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <memory>
 
 #include <string>
-using std::string;     // (or using namespace std if you want to use more of std.)
+using namespace std;     // (or using namespace std if you want to use more of std.)
 
 #include "include/dart_api.h"
 #include "include/dart_native_api.h"
@@ -14,6 +15,13 @@ using std::string;     // (or using namespace std if you want to use more of std
 Dart_NativeFunction ResolveName(Dart_Handle name,
                                 int argc,
                                 bool* auto_setup_scope);
+
+
+struct DBRef {
+  leveldb::DB* db;
+  int ref_count;
+  bool is_closed;
+};
 
 
 DART_EXPORT Dart_Handle sample_extension_Init(Dart_Handle parent_library) {
@@ -34,7 +42,7 @@ DART_EXPORT Dart_Handle sample_extension_Init(Dart_Handle parent_library) {
   }
 
   result_code = Dart_CreateNativeWrapperClass(
-      parent_library, Dart_NewStringFromCString("NativeIterator"), 1);
+      parent_library, Dart_NewStringFromCString("NativeIterator"), 2);
   if (Dart_IsError(result_code)) {
     return result_code;
   }
@@ -50,6 +58,11 @@ Dart_Handle HandleError(Dart_Handle handle) {
   return handle;
 }
 
+static void DBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+  printf("FINALIZE db");
+  std::shared_ptr<leveldb::DB>* ptr = (std::shared_ptr<leveldb::DB>*) peer;
+  delete ptr;
+}
 
 void DBOpen(Dart_NativeArguments arguments) {
   Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
@@ -65,8 +78,13 @@ void DBOpen(Dart_NativeArguments arguments) {
   leveldb::Status status = leveldb::DB::Open(options, path, &db);
   assert(status.ok());
 
-  result =  Dart_SetNativeInstanceField(arg, 0, (intptr_t) db);
+  DBRef* dbref = new DBRef();
 
+  std::shared_ptr<leveldb::DB>* ptr = new std::shared_ptr<leveldb::DB>(db);
+
+  result = Dart_SetNativeInstanceField(arg, 0, (intptr_t) ptr);
+
+  Dart_NewWeakPersistentHandle(arg, ptr, 0, DBFinalizer);
   Dart_SetReturnValue(arguments, Dart_Null());
 }
 
@@ -82,9 +100,9 @@ void DBGet(Dart_NativeArguments arguments) {
     result = Dart_StringToCString(key_handle, &key_str);
 
     leveldb::Status s;
-    leveldb::DB* db = (leveldb::DB*) ptr;
+    std::shared_ptr<leveldb::DB>* db = (std::shared_ptr<leveldb::DB>*) ptr;
     std:string value;
-    s = db->Get(leveldb::ReadOptions(), key_str, &value);
+    s = db->get()->Get(leveldb::ReadOptions(), key_str, &value);
 
     Dart_SetReturnValue(arguments, Dart_NewStringFromCString(value.c_str()));
 }
@@ -105,8 +123,8 @@ void DBPut(Dart_NativeArguments arguments) {
     result = Dart_StringToCString(value_handle, &value_str);
 
     leveldb::Status s;
-    leveldb::DB* db = (leveldb::DB*) ptr;
-    s = db->Put(leveldb::WriteOptions(), key_str, value_str);
+    std::shared_ptr<leveldb::DB>* db = (std::shared_ptr<leveldb::DB>*) ptr;
+    s = db->get()->Put(leveldb::WriteOptions(), key_str, value_str);
 
     Dart_SetReturnValue(arguments, Dart_Null());
 }
@@ -123,11 +141,19 @@ void DBDelete(Dart_NativeArguments arguments) {
     result = Dart_StringToCString(key_handle, &key_str);
 
     leveldb::Status s;
-    leveldb::DB* db = (leveldb::DB*) ptr;
-    s = db->Delete(leveldb::WriteOptions(), key_str);
+    std::shared_ptr<leveldb::DB>* db = (std::shared_ptr<leveldb::DB>*) ptr;
+    s = db->get()->Delete(leveldb::WriteOptions(), key_str);
 
     Dart_SetReturnValue(arguments, Dart_Null());
 }
+
+
+static void IteratorFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+  leveldb::Iterator* it = (leveldb::Iterator*) peer;
+  printf("FINALIZE iterator %p", it);
+  delete it;
+}
+
 
 void DBNewIterator(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
@@ -135,11 +161,13 @@ void DBNewIterator(Dart_NativeArguments arguments) {
     Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
 
     leveldb::Status s;
-    leveldb::DB* db = (leveldb::DB*) ptr;
-    leveldb::Iterator* it = db->NewIterator(leveldb::ReadOptions());
+    std::shared_ptr<leveldb::DB>* db = (std::shared_ptr<leveldb::DB>*) ptr;
+    leveldb::Iterator* it = db->get()->NewIterator(leveldb::ReadOptions());
 
     Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
-    result =  Dart_SetNativeInstanceField(arg1, 0, (intptr_t) it);
+//    result = Dart_SetNativeInstanceField(arg1, 0, (intptr_t) newDbRef);
+    result = Dart_SetNativeInstanceField(arg1, 1, (intptr_t) it);
+    Dart_NewWeakPersistentHandle(arg1, it, 0, IteratorFinalizer);
 
     Dart_SetReturnValue(arguments, Dart_Null());
 }
@@ -148,7 +176,7 @@ void DBNewIterator(Dart_NativeArguments arguments) {
 void IteratorSeek(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
     intptr_t ptr;
-    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
+    Dart_Handle result = Dart_GetNativeInstanceField(arg, 1, &ptr);
 
     leveldb::Status s;
     leveldb::Iterator* it = (leveldb::Iterator*) ptr;
@@ -161,7 +189,7 @@ void IteratorSeek(Dart_NativeArguments arguments) {
 void IteratorValid(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
     intptr_t ptr;
-    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
+    Dart_Handle result = Dart_GetNativeInstanceField(arg, 1, &ptr);
 
     leveldb::Iterator* it = (leveldb::Iterator*) ptr;
     bool ret = it->Valid();
@@ -173,7 +201,7 @@ void IteratorValid(Dart_NativeArguments arguments) {
 void IteratorNext(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
     intptr_t ptr;
-    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
+    Dart_Handle result = Dart_GetNativeInstanceField(arg, 1, &ptr);
     leveldb::Iterator* it = (leveldb::Iterator*) ptr;
     it->Next();
     Dart_SetReturnValue(arguments, Dart_Null());
@@ -183,7 +211,7 @@ void IteratorNext(Dart_NativeArguments arguments) {
 void IteratorKey(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
     intptr_t ptr;
-    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
+    Dart_Handle result = Dart_GetNativeInstanceField(arg, 1, &ptr);
     leveldb::Iterator* it = (leveldb::Iterator*) ptr;
     leveldb::Slice key = it->key();
     Dart_SetReturnValue(arguments, Dart_NewStringFromCString(key.ToString().c_str()));
@@ -193,7 +221,7 @@ void IteratorKey(Dart_NativeArguments arguments) {
 void IteratorValue(Dart_NativeArguments arguments) {
     Dart_Handle arg = Dart_GetNativeArgument(arguments, 0);
     intptr_t ptr;
-    Dart_Handle result = Dart_GetNativeInstanceField(arg, 0, &ptr);
+    Dart_Handle result = Dart_GetNativeInstanceField(arg, 1, &ptr);
     leveldb::Iterator* it = (leveldb::Iterator*) ptr;
     leveldb::Slice value = it->value();
     Dart_SetReturnValue(arguments, Dart_NewStringFromCString(value.ToString().c_str()));

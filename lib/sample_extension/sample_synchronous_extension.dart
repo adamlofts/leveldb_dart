@@ -19,7 +19,7 @@ class LevelDB extends NativeDB {
   void delete(String key) { _delete(this, key); }
 
   LevelIterator get iterator {
-    LevelIterator it = new LevelIterator();
+    LevelIterator it = new LevelIterator(this);
     _newIterator(this, it);
     return it;
   }
@@ -32,6 +32,13 @@ class LevelDB extends NativeDB {
 }
 
 class LevelIterator extends NativeIterator {
+
+  final LevelDB db;
+
+  // Keep a reference to the db. This is so that the db can not be finalized whilst
+  // the iterator is reachable
+  LevelIterator(LevelDB this.db);
+
   void seek() {
     _seek(this);
   }
