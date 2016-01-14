@@ -5,53 +5,152 @@
 library sample_synchronous_extension;
 
 import 'dart-ext:sample_extension';
+import 'dart:async';
+import 'dart:isolate';
+import 'dart:typed_data';
 
-class LevelDB extends NativeDB {
+class LevelDB {
 
-  static LevelDB open(String path) {
-    LevelDB kls = new LevelDB();
-    _init(kls, path);
-    return kls;
+  final String _path;
+
+  SendPort _servicePort;
+
+  SendPort _newServicePort() native "DB_ServicePort";
+
+  LevelDB(String path) :
+    _path = path {
+    _servicePort = _newServicePort();
   }
 
-  String get(String key) => _get(this, key);
-  void put(String key, String value) { _put(this, key, value); }
-  void delete(String key) { _delete(this, key); }
+  Future open() {
+    var completer = new Completer();
+    var replyPort = new RawReceivePort();
+    var args = new List(3);
+    args[0] = replyPort.sendPort;
+    args[1] = 1;
+    args[2] = _path;
 
-  LevelIterator get iterator {
-    LevelIterator it = new LevelIterator(this);
-    _newIterator(this, it);
-    return it;
+    replyPort.handler = (result) {
+      replyPort.close();
+      if (result != null) {
+        completer.complete(result);
+      } else {
+        completer.completeError(new Exception("Random array creation failed"));
+      }
+    };
+    _servicePort.send(args);
+    return completer.future;
   }
 
-  static void _init(LevelDB kls, String path) native 'DBOpen';
-  static String _get(LevelDB kls, String key) native 'DBGet';
-  static void _put(LevelDB kls, String key, String value) native 'DBPut';
-  static void _delete(LevelDB kls, String key) native 'DBDelete';
-  static void _newIterator(LevelDB kls, LevelIterator it) native "DBNewIterator";
-}
+  Future close() {
+    var completer = new Completer();
+    var replyPort = new RawReceivePort();
+    var args = new List(2);
+    args[0] = replyPort.sendPort;
+    args[1] = 2;
 
-class LevelIterator extends NativeIterator {
-
-  final LevelDB db;
-
-  // Keep a reference to the db. This is so that the db can not be finalized whilst
-  // the iterator is reachable
-  LevelIterator(LevelDB this.db);
-
-  void seek() {
-    _seek(this);
+    replyPort.handler = (result) {
+      replyPort.close();
+      if (result != null) {
+        completer.complete(result);
+      } else {
+        completer.completeError(new Exception("Random array creation failed"));
+      }
+    };
+    _servicePort.send(args);
+    return completer.future;
   }
-  bool get valid => _valid(this);
-  void next() => _next(this);
 
-  String get key => _key(this);
-  String get value => _value(this);
+  Future get(String key) {
+    var completer = new Completer();
+    var replyPort = new RawReceivePort();
+    var args = new List(3);
+    args[0] = replyPort.sendPort;
+    args[1] = 3;
+    args[2] = key;
 
-  static void _seek(LevelIterator it) native 'IteratorSeek';
-  static bool _valid(LevelIterator it) native "IteratorValid";
-  static void _next(LevelIterator it) native "IteratorNext";
+    replyPort.handler = (result) {
+      replyPort.close();
+      if (result != null) {
+        completer.complete(result);
+      } else {
+        completer.completeError(new Exception("Random array creation failed"));
+      }
+    };
+    _servicePort.send(args);
+    return completer.future;
+  }
 
-  static String _key(LevelIterator it) native "IteratorKey";
-  static String _value(LevelIterator it) native "IteratorValue";
+  Future put(String key, String value) {
+    var completer = new Completer();
+    var replyPort = new RawReceivePort();
+    var args = new List(4);
+    args[0] = replyPort.sendPort;
+    args[1] = 3;
+    args[2] = key;
+    args[3] = value;
+
+    replyPort.handler = (result) {
+      replyPort.close();
+      if (result != null) {
+        completer.complete(result);
+      } else {
+        completer.completeError(new Exception("Random array creation failed"));
+      }
+    };
+    _servicePort.send(args);
+    return completer.future;
+  }
+
+  Future delete(String key) {
+    var completer = new Completer();
+    var replyPort = new RawReceivePort();
+    var args = new List(3);
+    args[0] = replyPort.sendPort;
+    args[1] = 4;
+    args[2] = key;
+
+    replyPort.handler = (result) {
+      replyPort.close();
+      if (result != null) {
+        completer.complete(result);
+      } else {
+        completer.completeError(new Exception("Random array creation failed"));
+      }
+    };
+    _servicePort.send(args);
+    return completer.future;
+  }
+
+  /**
+   * Iterate through the db returning (key, value) tuples.
+   */
+  Stream<List<Uint8List>> getItems() {
+    // FIXME: Pause() implementation
+    StreamController<List<Uint8List>> controller = new StreamController<List<Uint8List>>();
+    RawReceivePort replyPort = new RawReceivePort();
+    List args = new List(2);
+    args[0] = replyPort.sendPort;
+    args[1] = 5;
+
+    replyPort.handler = (result) {
+      if (result == null) {
+        replyPort.close();
+        controller.addError(new Exception("Strem error"));
+        controller.close();
+        return;
+      }
+
+      if (result == 0) { // Stream finished
+        replyPort.close();
+        controller.close();
+        return;
+      }
+
+      controller.add(result);
+    };
+    _servicePort.send(args);
+
+    return controller.stream;
+  }
 }
