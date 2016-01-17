@@ -87,4 +87,21 @@ void main() {
     await db2.close();
   });
 
+  test('Usage after close()', () async {
+    LevelDB db1 = await openTestDB();
+    db1.close();
+    expect(db1.get(fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
+    expect(db1.delete(fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
+    expect(db1.put(fromString("SOME KEY"), fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
+    expect(db1.close(), throwsA(const LevelDBClosedError()));
+
+    try {
+      await for (var _ in db1.getItems()) {
+        expect(true, equals(false)); // Should not happen.
+      }
+    } on LevelDBClosedError {
+      expect(true, equals(true)); // Should happen.
+    }
+  });
+
 }

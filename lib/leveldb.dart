@@ -10,6 +10,16 @@ import 'dart:typed_data';
 
 import 'dart-ext:leveldb';
 
+abstract class LevelDBError implements Exception {
+  final String msg;
+  const LevelDBError(this.msg);
+  String toString() => 'LevelDBError: $msg';
+}
+
+class LevelDBClosedError extends LevelDBError {
+  const LevelDBClosedError() : super("DB already closed");
+}
+
 class LevelDB {
 
   SendPort _servicePort;
@@ -24,6 +34,22 @@ class LevelDB {
     _servicePort = servicePort,
     _ptr = ptr;
 
+  static LevelDBError _getError(var reply) {
+    if (reply == -1) {
+      return const LevelDBClosedError();
+    }
+    return null;
+  }
+
+  static bool _completeError(Completer completer, var reply) {
+    LevelDBError e = _getError(reply);
+    if (e != null) {
+      completer.completeError(e);
+      return true;
+    }
+    return false;
+  }
+
   static Future<LevelDB> open(String path) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
@@ -33,14 +59,14 @@ class LevelDB {
     args[2] = path;
 
     SendPort servicePort = _newServicePort();
-    replyPort.handler = (int result) {
+    replyPort.handler = (var result) {
       replyPort.close();
-      if (result != null) {
-        LevelDB db = new LevelDB(servicePort, result);
-        completer.complete(db);
-      } else {
-        completer.completeError(new Exception("Failed to create db: FIXME: Add error."));
+      if (_completeError(completer, result)) {
+        return;
       }
+      assert(result != null);
+      LevelDB db = new LevelDB(servicePort, result);
+      completer.complete(db);
     };
     servicePort.send(args);
     return completer.future;
@@ -56,11 +82,10 @@ class LevelDB {
 
     replyPort.handler = (result) {
       replyPort.close();
-      if (result != null) {
-        completer.complete(result);
-      } else {
-        completer.completeError(new Exception("Random array creation failed"));
+      if (_completeError(completer, result)) {
+        return;
       }
+      completer.complete(result);
     };
     _servicePort.send(args);
     return completer.future;
@@ -77,12 +102,13 @@ class LevelDB {
 
     replyPort.handler = (result) {
       replyPort.close();
+      if (_completeError(completer, result)) {
+        return;
+      }
       if (result == 0) { // key not found
         completer.complete(null);
       } else if (result != null) {
         completer.complete(result);
-      } else {
-        completer.completeError(new Exception("Random array creation failed"));
       }
     };
     _servicePort.send(args);
@@ -102,11 +128,10 @@ class LevelDB {
 
     replyPort.handler = (result) {
       replyPort.close();
-      if (result != null) {
-        completer.complete(result);
-      } else {
-        completer.completeError(new Exception("Random array creation failed"));
+      if (_completeError(completer, result)) {
+        return;
       }
+      completer.complete();
     };
     _servicePort.send(args);
     return completer.future;
@@ -123,11 +148,10 @@ class LevelDB {
 
     replyPort.handler = (result) {
       replyPort.close();
-      if (result != null) {
-        completer.complete();
-      } else {
-        completer.completeError(new Exception("Random array creation failed"));
+      if (_completeError(completer, result)) {
+        return;
       }
+      completer.complete();
     };
     _servicePort.send(args);
     return completer.future;
@@ -152,9 +176,10 @@ class LevelDB {
     args[8] = lt == null; // Is inclusive
 
     replyPort.handler = (result) {
-      if (result == null) {
+      LevelDBError e = _getError(result);
+      if (e != null) {
         replyPort.close();
-        controller.addError(new Exception("Strem error"));
+        controller.addError(e);
         controller.close();
         return;
       }

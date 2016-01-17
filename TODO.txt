@@ -1,5 +1,3 @@
 Implement pause() in Stream
 Implement close() in finalizer()
-No crash calling close twice.
-No crash calling get(), put(), delete(), after close()
 
