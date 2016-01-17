@@ -348,6 +348,14 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
 
       leveldb::DB* new_db;
       leveldb::Status status = leveldb::DB::Open(options, path, &new_db);
+
+      if (status.IsIOError()) {
+        Dart_CObject result;
+        result.type = Dart_CObject_kInt32;
+        result.value.as_int32 = -2;
+        Dart_PostCObject(reply_port_id, &result);
+        return;
+      }
       assert(status.ok());
 
       DBRef* db_ref = new DBRef();

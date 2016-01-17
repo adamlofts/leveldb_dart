@@ -104,4 +104,16 @@ void main() {
     }
   });
 
+  test('DB locking throws IOError', () async {
+    LevelDB db1 = await openTestDB();
+    try {
+      await openTestDB();
+      expect(true, equals(false)); // Should not happen. The db is locked.
+    } on LevelDBIOError {
+      expect(true, equals(true)); // Should happen.
+    } finally {
+      await db1.close();
+    }
+  });
+
 }

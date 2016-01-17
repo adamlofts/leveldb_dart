@@ -20,6 +20,10 @@ class LevelDBClosedError extends LevelDBError {
   const LevelDBClosedError() : super("DB already closed");
 }
 
+class LevelDBIOError extends LevelDBError {
+  const LevelDBIOError() : super("IOError");
+}
+
 class LevelDB extends NativeDB {
 
   SendPort _servicePort;
@@ -38,6 +42,9 @@ class LevelDB extends NativeDB {
   static LevelDBError _getError(var reply) {
     if (reply == -1) {
       return const LevelDBClosedError();
+    }
+    if (reply == -2) {
+      return const LevelDBIOError();
     }
     return null;
   }
