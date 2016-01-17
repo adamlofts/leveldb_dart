@@ -30,18 +30,27 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
     return result_code;
   }
 
+  result_code = Dart_CreateNativeWrapperClass(parent_library, Dart_NewStringFromCString("NativeDB"), 1);
+  if (Dart_IsError(result_code)) {
+    return result_code;
+  }
+
   return Dart_Null();
 }
 
 
 struct DBRef {
   leveldb::DB *db;
-  bool is_closed;
-  int ref_count;
+
+  bool is_closed; // Guarded
+  int ref_count; // Guarded
   std::mutex mtx; // mutex for ref_count
 };
 
 
+/**
+ * Drop a reference to db. If this is the last reference then the db will be closed. Thread safe
+ **/
 static void dec_ref(DBRef *db_ref) {
   bool is_closing = false;
   db_ref->mtx.lock();
@@ -58,13 +67,40 @@ static void dec_ref(DBRef *db_ref) {
 }
 
 
-bool inc_ref(DBRef *db_ref) {
+/**
+ * Take a reference to db. If successful then the db will not be closed before you call dec_ref(). Thread safe.
+ * If this function returns true then the db has already been closed and your reference is not valid.
+ **/
+static bool inc_ref(DBRef *db_ref) {
   bool is_closed;
   db_ref->mtx.lock();
   is_closed = db_ref->is_closed;
-  db_ref->ref_count += 1;
+  if (!is_closed) {
+    db_ref->ref_count += 1;
+  }
   db_ref->mtx.unlock();
   return is_closed;
+}
+
+
+/**
+ * Finalizer called when the dart LevelDB instance is not reachable.
+ * */
+static void NativeDBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+  DBRef* db_ref = (DBRef*) peer;
+
+  // It is possible that db is still open if the user forgot to close()
+  bool is_closed;
+  db_ref->mtx.lock();
+  is_closed = db_ref->is_closed;
+  db_ref->mtx.unlock();
+
+  if (!is_closed) {
+    printf("WARNING: LevelDB is not closed in finalizer. Calling close() for you.\n");
+    dec_ref(db_ref);
+  }
+
+  delete db_ref;
 }
 
 
@@ -347,8 +383,8 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
       error = -1;
     } else {
       error = levelDBServiceHandler(reply_port_id, db_ref, msg, message);
+      dec_ref(db_ref);
     }
-    dec_ref(db_ref);
   }
   if (error < 0) {
     Dart_CObject result;
@@ -375,6 +411,23 @@ void dbServicePort(Dart_NativeArguments arguments) {
 }
 
 
+/**
+ * Add a finalizer to the NativeDB class so we call close() if the user has not already done so.
+ */
+void dbInit(Dart_NativeArguments arguments) {
+  Dart_EnterScope();
+
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  int64_t value;
+  Dart_GetNativeIntegerArgument(arguments, 1, &value);
+
+  Dart_NewWeakPersistentHandle(arg0, (void*) value, 0 /* external_allocation_size */, NativeDBFinalizer);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
 struct FunctionLookup {
   const char* name;
   Dart_NativeFunction function;
@@ -382,6 +435,7 @@ struct FunctionLookup {
 
 
 FunctionLookup function_list[] = {
+    {"DB_Init", dbInit},
     {"DB_ServicePort", dbServicePort},
 
     {NULL, NULL}};

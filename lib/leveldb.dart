@@ -20,12 +20,13 @@ class LevelDBClosedError extends LevelDBError {
   const LevelDBClosedError() : super("DB already closed");
 }
 
-class LevelDB {
+class LevelDB extends NativeDB {
 
   SendPort _servicePort;
   int _ptr;
 
   static SendPort _newServicePort() native "DB_ServicePort";
+  void _init(int ptr) native "DB_Init";
 
   /**
    * Internal constructor. Use LevelDB::open().
@@ -64,8 +65,8 @@ class LevelDB {
       if (_completeError(completer, result)) {
         return;
       }
-      assert(result != null);
       LevelDB db = new LevelDB(servicePort, result);
+      db._init(result);
       completer.complete(db);
     };
     servicePort.send(args);
