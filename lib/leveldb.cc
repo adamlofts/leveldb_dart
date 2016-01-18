@@ -1,4 +1,5 @@
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <memory>
@@ -34,6 +35,10 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
   if (Dart_IsError(result_code)) {
     return result_code;
   }
+  result_code = Dart_CreateNativeWrapperClass(parent_library, Dart_NewStringFromCString("NativeIterator"), 1);
+  if (Dart_IsError(result_code)) {
+    return result_code;
+  }
 
   return Dart_Null();
 }
@@ -45,6 +50,31 @@ struct DBRef {
   bool is_closed; // Guarded
   int ref_count; // Guarded
   std::mutex mtx; // mutex for ref_count
+};
+
+
+struct IteratorRef {
+  DBRef *db_ref;
+  leveldb::Iterator *iterator;
+  Dart_Port reply_port_id;
+
+  pthread_t thread;
+
+  bool is_paused;
+  std::mutex mtx; // mutex for is_paused
+
+  // Iterator params
+  int64_t limit;
+  bool is_gt_closed;
+  bool is_lt_closed;
+  uint8_t* gt;
+  int64_t gt_len;
+  uint8_t* lt;
+  int64_t lt_len;
+
+  // Iterator state
+  bool is_seek_done;
+  int64_t count;
 };
 
 
@@ -109,6 +139,20 @@ Dart_Handle HandleError(Dart_Handle handle) {
     Dart_PropagateError(handle);
   }
   return handle;
+}
+
+
+/**
+ * Finalizer called when the dart LevelDB instance is not reachable.
+ * */
+static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+  IteratorRef* it_ref = (IteratorRef*) peer;
+
+  assert(it_ref->is_paused);
+  assert(it_ref->thread == 0);
+  assert(it_ref->db_ref == NULL);
+
+  delete it_ref;
 }
 
 
@@ -200,115 +244,6 @@ int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, D
       Dart_PostCObject(reply_port_id, &result);
       return 0;
     }
-  }
-
-  if (msg == 6 &&
-          message->value.as_array.length == 9) { // stream()
-
-    Dart_CObject* param_limit = message->value.as_array.values[3];
-    int64_t limit = -1;
-    if (param_limit->type == Dart_CObject_kInt32) {
-      limit = param_limit->value.as_int32;
-    } else if (param_limit->type == Dart_CObject_kInt64) {
-      limit = param_limit->value.as_int64;
-    }
-
-    Dart_CObject* param_fill_cache = message->value.as_array.values[4];
-    bool fill_cache = param_fill_cache->value.as_bool;
-
-    leveldb::ReadOptions options;
-    options.fill_cache = fill_cache;
-
-    leveldb::Iterator* it = db->NewIterator(options);
-
-    Dart_CObject* param_start = message->value.as_array.values[5];
-    if (param_start->type == Dart_CObject_kTypedData) {
-      leveldb::Slice start_slice = leveldb::Slice((const char*)param_start->value.as_typed_data.values, param_start->value.as_typed_data.length);
-      it->Seek(start_slice);
-
-      Dart_CObject* param_start_inclusive = message->value.as_array.values[6];
-      bool is_start_inclusive = param_start_inclusive->value.as_bool;
-      if (!is_start_inclusive && it->Valid()) {
-        // If we are pointing at start_slice and not inclusive then we need to advance by 1
-        leveldb::Slice key = it->key();
-        if (key.compare(start_slice) == 0) {
-          it->Next();
-        }
-      }
-    } else {
-      it->SeekToFirst();
-    }
-
-    Dart_CObject* param_end = message->value.as_array.values[7];
-    leveldb::Slice end_slice;
-    bool is_end_inclusive = false;
-
-    if (param_end->type == Dart_CObject_kTypedData) {
-       end_slice = leveldb::Slice((const char*)param_end->value.as_typed_data.values, param_end->value.as_typed_data.length);
-       Dart_CObject* param_end_inclusive = message->value.as_array.values[8];
-       is_end_inclusive = param_end_inclusive->value.as_bool;
-    }
-
-    int64_t count = 0;
-    while (it->Valid()) {
-      if (limit >= 0 && count >= limit) {
-        break;
-      }
-
-      leveldb::Slice key = it->key();
-      leveldb::Slice value = it->value();
-
-      // Check if key is equal to end slice
-      if (!end_slice.empty()) {
-
-        int cmp = key.compare(end_slice);
-        if (cmp == 0 && !is_end_inclusive) {  // key == end_slice and not inclusive
-          break;
-        }
-        if (cmp > 0) { // key > end_slice
-          break;
-        }
-      }
-
-      Dart_CObject* values[2];
-
-      Dart_CObject r1;
-      r1.type = Dart_CObject_kTypedData;
-      r1.value.as_typed_data.type = Dart_TypedData_kUint8;
-      // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
-      r1.value.as_typed_data.values = (uint8_t*) key.data();
-      r1.value.as_typed_data.length = key.size();
-      values[0] = &r1;
-
-      Dart_CObject r2;
-      r2.type = Dart_CObject_kTypedData;
-      r2.value.as_typed_data.type = Dart_TypedData_kUint8;
-      // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
-      r2.value.as_typed_data.values = (uint8_t*) value.data();
-      r2.value.as_typed_data.length = value.size();
-      values[1] = &r2;
-
-      Dart_CObject result;
-      result.type = Dart_CObject_kArray;
-      result.value.as_array.length = 2;
-      result.value.as_array.values = values;
-
-      // It is OK that result is destroyed when function exits.
-      // Dart_PostCObject has copied its data.
-      Dart_PostCObject(reply_port_id, &result);
-
-      count += 1;
-      it->Next();
-    }
-
-    assert(it->status().ok());  // Check for any errors found during the scan
-    delete it;
-
-    Dart_CObject result;
-    result.type = Dart_CObject_kInt32;
-    result.value.as_int32 = 0;
-    Dart_PostCObject(reply_port_id, &result);
-    return 0;
   }
 
   return -2;
@@ -436,6 +371,223 @@ void dbInit(Dart_NativeArguments arguments) {
 }
 
 
+void* IteratorWork(void *data) {
+  IteratorRef* it_ref = (IteratorRef*) data;
+  leveldb::Iterator* it = it_ref->iterator;
+
+  // The first time around we do an initial seek.
+  if (!it_ref->is_seek_done) {
+    it_ref->is_seek_done = true;
+    if (it_ref->gt_len > 0) {
+      leveldb::Slice start_slice = leveldb::Slice((char*)it_ref->gt, it_ref->gt_len);
+      it->Seek(start_slice);
+
+      if (!it_ref->is_gt_closed && it->Valid()) {
+        // If we are pointing at start_slice and not inclusive then we need to advance by 1
+        leveldb::Slice key = it->key();
+        if (key.compare(start_slice) == 0) {
+          it->Next();
+        }
+      }
+    } else {
+      it->SeekToFirst();
+    }
+  }
+
+  leveldb::Slice end_slice = leveldb::Slice((char*)it_ref->lt, it_ref->lt_len);
+
+  while (!it_ref->is_paused && it->Valid()) {
+    if (it_ref->limit >= 0 && it_ref->count >= it_ref->limit) {
+      break;
+    }
+
+    leveldb::Slice key = it->key();
+    leveldb::Slice value = it->value();
+
+    // Check if key is equal to end slice
+    if (it_ref->lt_len > 0) {
+      int cmp = key.compare(end_slice);
+      if (cmp == 0 && !it_ref->is_lt_closed) {  // key == end_slice and not closed
+        break;
+      }
+      if (cmp > 0) { // key > end_slice
+        break;
+      }
+    }
+
+    Dart_CObject* values[2];
+
+    Dart_CObject r1;
+    r1.type = Dart_CObject_kTypedData;
+    r1.value.as_typed_data.type = Dart_TypedData_kUint8;
+    // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
+    r1.value.as_typed_data.values = (uint8_t*) key.data();
+    r1.value.as_typed_data.length = key.size();
+    values[0] = &r1;
+
+    Dart_CObject r2;
+    r2.type = Dart_CObject_kTypedData;
+    r2.value.as_typed_data.type = Dart_TypedData_kUint8;
+    // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
+    r2.value.as_typed_data.values = (uint8_t*) value.data();
+    r2.value.as_typed_data.length = value.size();
+    values[1] = &r2;
+
+    Dart_CObject result;
+    result.type = Dart_CObject_kArray;
+    result.value.as_array.length = 2;
+    result.value.as_array.values = values;
+
+    // It is OK that result is destroyed when function exits.
+    // Dart_PostCObject has copied its data.
+    Dart_PostCObject(it_ref->reply_port_id, &result);
+
+    it_ref->count += 1;
+    it->Next();
+  }
+
+  // Send end of stream.
+  Dart_CObject eos;
+  eos.type = Dart_CObject_kInt32;
+  eos.value.as_int32 = 0;
+  Dart_PostCObject(it_ref->reply_port_id, &eos);
+}
+
+void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed)
+  Dart_EnterScope();
+
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  int64_t value;
+  Dart_GetNativeIntegerArgument(arguments, 1, &value);
+  DBRef* db_ref = (DBRef *) value;
+
+  bool is_closed = inc_ref(db_ref);
+  if (is_closed) {
+    Dart_SetReturnValue(arguments, Dart_NewInteger(-1));
+    Dart_ExitScope();
+    return;
+  }
+
+  IteratorRef* it_ref = new IteratorRef();
+  it_ref->db_ref = db_ref;
+  it_ref->is_paused = true;
+  it_ref->thread = 0;
+  it_ref->is_seek_done = false;
+  it_ref->count = 0;
+
+  leveldb::ReadOptions options;
+  Dart_GetNativeBooleanArgument(arguments, 4, &options.fill_cache);
+  it_ref->iterator = db_ref->db->NewIterator(options);
+
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_SetNativeInstanceField(arg0, 0, (intptr_t) it_ref);
+
+  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
+  Dart_Port port_id;
+  Dart_SendPortGetId(arg2, &it_ref->reply_port_id);
+
+  Dart_GetNativeIntegerArgument(arguments, 3, &it_ref->limit);
+
+  Dart_Handle arg5 = Dart_GetNativeArgument(arguments, 5);
+  if (Dart_IsNull(arg5)) {
+    it_ref->gt = NULL;
+    it_ref->gt_len = 0;
+  } else if (Dart_IsString(arg5)) {
+    uint8_t* s;
+    Dart_StringToUTF8(arg5, &s, &it_ref->gt_len);
+    it_ref->gt = (uint8_t*) malloc(it_ref->gt_len);
+    memcpy(it_ref->gt, s, it_ref->gt_len);
+  } else {
+    assert(false); // Not reached
+  }
+
+  Dart_Handle arg7 = Dart_GetNativeArgument(arguments, 7);
+  if (Dart_IsNull(arg7)) {
+    it_ref->lt = NULL;
+    it_ref->lt_len = 0;
+  } else if (Dart_IsString(arg7)) {
+    uint8_t* s;
+    Dart_StringToUTF8(arg7, &s, &it_ref->lt_len);
+    it_ref->lt = (uint8_t*) malloc(it_ref->lt_len);
+    memcpy(it_ref->lt, s, it_ref->lt_len);
+  } else {
+    assert(false); // Not reached
+  }
+
+  Dart_GetNativeBooleanArgument(arguments, 6, &it_ref->is_gt_closed);
+  Dart_GetNativeBooleanArgument(arguments, 8, &it_ref->is_lt_closed);
+
+  Dart_NewWeakPersistentHandle(arg0, (void*) it_ref, 0 /* external_allocation_size */, NativeIteratorFinalizer);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+void iteratorResume(Dart_NativeArguments arguments) {
+  Dart_EnterScope();
+
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  IteratorRef* it_ref;
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
+
+  assert(it_ref->is_paused);
+  assert(it_ref->thread == 0);
+
+  it_ref->is_paused = false;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+  int rc = pthread_create(&it_ref->thread, &attr, IteratorWork, (void*)it_ref);
+
+  pthread_attr_destroy(&attr);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+void iteratorPause(Dart_NativeArguments arguments) {
+  Dart_EnterScope();
+
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  IteratorRef* it_ref;
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
+
+  it_ref->is_paused = true;
+
+  int rc = pthread_join(it_ref->thread, NULL);
+  it_ref->thread = 0;
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+void iteratorCancel(Dart_NativeArguments arguments) {
+  Dart_EnterScope();
+
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  IteratorRef* it_ref;
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
+
+  it_ref->is_paused = true;
+
+  int rc = pthread_join(it_ref->thread, NULL);
+  it_ref->thread = 0;
+
+  delete it_ref->iterator;
+  dec_ref(it_ref->db_ref);
+  it_ref->db_ref = NULL;
+
+  delete it_ref->gt;
+  delete it_ref->lt;
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
 struct FunctionLookup {
   const char* name;
   Dart_NativeFunction function;
@@ -445,6 +597,11 @@ struct FunctionLookup {
 FunctionLookup function_list[] = {
     {"DB_Init", dbInit},
     {"DB_ServicePort", dbServicePort},
+
+    {"Iterator_New", iteratorNew},
+    {"Iterator_Resume", iteratorResume},
+    {"Iterator_Pause", iteratorPause},
+    {"Iterator_Cancel", iteratorCancel},
 
     {NULL, NULL}};
 
@@ -493,4 +650,3 @@ Dart_NativeFunction ResolveName(Dart_Handle name,
   Dart_ExitScope();
   return result;
 }
-

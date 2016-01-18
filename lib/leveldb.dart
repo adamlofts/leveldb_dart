@@ -24,6 +24,25 @@ class LevelDBIOError extends LevelDBError {
   const LevelDBIOError() : super("IOError");
 }
 
+class _Iterator extends NativeIterator {
+
+  static _Iterator _new(int ptr, SendPort port, int limit, bool fillCache, String gt, bool is_gt_closed, String lt, bool is_lt_closed) {
+    _Iterator it = new _Iterator();
+    int v = it._init(ptr, port, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed);
+    LevelDBError e = LevelDB._getError(v);
+    if (e != null) {
+      throw e;
+    }
+    return it;
+  }
+
+  int _init(int ptr, SendPort port, int limit, bool fillCache, String gt, bool is_gt_closed, String lt, bool is_lt_closed) native "Iterator_New";
+
+  void pause() native "Iterator_Pause";
+  void resume() native "Iterator_Resume";
+  void cancel() native "Iterator_Cancel";
+}
+
 class LevelDB extends NativeDB {
 
   SendPort _servicePort;
@@ -168,20 +187,25 @@ class LevelDB extends NativeDB {
   /**
    * Iterate through the db returning (key, value) tuples.
    */
-  Stream<List<Uint8List>> getItems({ Uint8List gt, Uint8List gte, Uint8List lt, Uint8List lte, int limit: -1, bool fillCache: true }) {
-    // FIXME: Pause() implementation
-    StreamController<List<Uint8List>> controller = new StreamController<List<Uint8List>>();
+  Stream<List<Uint8List>> getItems({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true }) {
     RawReceivePort replyPort = new RawReceivePort();
-    List args = new List(9);
-    args[0] = replyPort.sendPort;
-    args[1] = 6;
-    args[2] = _ptr;
-    args[3] = limit;
-    args[4] = fillCache;
-    args[5] = gt == null ? gte : gt;
-    args[6] = gt == null; // Is inclusive
-    args[7] = lt == null ? lte : lt;
-    args[8] = lt == null; // Is inclusive
+    _Iterator iterator = _Iterator._new(
+        _ptr,
+        replyPort.sendPort,
+        limit,
+        fillCache,
+        gt == null ? gte : gt,
+        gt == null,
+        lt == null ? lte : lt,
+        lt == null
+    );
+
+    StreamController<List<Uint8List>> controller = new StreamController<List<Uint8List>>(
+      onListen: () => iterator.resume(),
+      onPause: () => iterator.pause(),
+      onResume: () => iterator.resume(),
+      onCancel: () => iterator.cancel()
+    );
 
     replyPort.handler = (result) {
       LevelDBError e = _getError(result);
@@ -200,7 +224,6 @@ class LevelDB extends NativeDB {
 
       controller.add(result);
     };
-    _servicePort.send(args);
 
     return controller.stream;
   }
@@ -208,8 +231,8 @@ class LevelDB extends NativeDB {
   /**
    * Some pretty API below. Not stable.
    */
-  Stream<Uint8List> getKeys({ Uint8List gt, Uint8List gte, Uint8List lt, Uint8List lte, int limit: -1, bool fillCache: true }) =>
+  Stream<Uint8List> getKeys({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true }) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache).map((List<Uint8List> item) => item[0]);
-  Stream<Uint8List> getValues({ Uint8List gt, Uint8List gte, Uint8List lt, Uint8List lte, int limit: -1, bool fillCache: true }) =>
+  Stream<Uint8List> getValues({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true }) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache).map((List<Uint8List> item) => item[1]);
 }

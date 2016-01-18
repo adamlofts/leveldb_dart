@@ -38,37 +38,37 @@ void main() {
     // All keys
     keys = await db.getKeys().toList();
     expect(keys.length, equals(2));
-    keys = await db.getKeys(gte: fromString("k1")).toList();
+    keys = await db.getKeys(gte: "k1").toList();
     expect(keys.length, equals(2));
-    keys = await db.getKeys(gt: fromString("k1")).toList();
+    keys = await db.getKeys(gt: "k1").toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gt: fromString("k0")).toList();
+    keys = await db.getKeys(gt: "k0").toList();
     expect(keys.length, equals(2));
 
-    keys = await db.getKeys(gt: fromString("k5")).toList();
+    keys = await db.getKeys(gt: "k5").toList();
     expect(keys.length, equals(0));
-    keys = await db.getKeys(gte: fromString("k5")).toList();
+    keys = await db.getKeys(gte: "k5").toList();
     expect(keys.length, equals(0));
 
     keys = await db.getKeys(limit: 1).toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(lte: fromString("k2")).toList();
+    keys = await db.getKeys(lte: "k2").toList();
     expect(keys.length, equals(2));
-    keys = await db.getKeys(lt: fromString("k2")).toList();
+    keys = await db.getKeys(lt: "k2").toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gt: fromString("k1"), lt: fromString("k2")).toList();
+    keys = await db.getKeys(gt: "k1", lt: "k2").toList();
     expect(keys.length, equals(0));
 
-    keys = await db.getKeys(gte: fromString("k1"), lt: fromString("k2")).toList();
+    keys = await db.getKeys(gte: "k1", lt: "k2").toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gt: fromString("k1"), lte: fromString("k2")).toList();
+    keys = await db.getKeys(gt: "k1", lte: "k2").toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gte: fromString("k1"), lte: fromString("k2")).toList();
+    keys = await db.getKeys(gte: "k1", lte: "k2").toList();
     expect(keys.length, equals(2));
 
     await db.close();
@@ -89,7 +89,7 @@ void main() {
 
   test('Usage after close()', () async {
     LevelDB db1 = await openTestDB();
-    db1.close();
+    await db1.close();
     expect(db1.get(fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
     expect(db1.delete(fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
     expect(db1.put(fromString("SOME KEY"), fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
