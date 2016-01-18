@@ -116,4 +116,15 @@ void main() {
     }
   });
 
+  test('Exception inside iteration', () async {
+    LevelDB db1 = await openTestDB();
+    await db1.put(fromString("a"), fromString("1"));
+    await db1.put(fromString("b"), fromString("1"));
+    await db1.put(fromString("c"), fromString("1"));
+
+    await for (var row in db1.getItems()) {
+      throw new Exception("OH NO");
+    }
+  });
+
 }

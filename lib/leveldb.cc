@@ -63,6 +63,8 @@ struct IteratorRef {
   bool is_paused;
   std::mutex mtx; // mutex for is_paused
 
+  bool is_finalized;
+
   // Iterator params
   int64_t limit;
   bool is_gt_closed;
@@ -142,15 +144,54 @@ Dart_Handle HandleError(Dart_Handle handle) {
 }
 
 
+static void iteratorPauseAndJoin(IteratorRef *it_ref) {
+  bool is_pausing = false;
+  it_ref->mtx.lock();
+  if (!it_ref->is_paused) {
+    is_pausing = true;
+    it_ref->is_paused = true;
+  }
+  it_ref->mtx.unlock();
+
+  if (is_pausing) {
+    int rc = pthread_join(it_ref->thread, NULL);
+    it_ref->thread = 0;
+  }
+}
+
+
+static void iteratorFinalize(IteratorRef *it_ref) {
+  bool is_finalizing = false;
+  it_ref->mtx.lock();
+  if (!it_ref->is_finalized) {
+    is_finalizing = true;
+    it_ref->is_finalized = true;
+  }
+  it_ref->mtx.unlock();
+
+  if (is_finalizing) {
+    // First delete the iterator object
+    delete it_ref->iterator;
+
+    // Drop the db reference.
+    dec_ref(it_ref->db_ref);
+
+    // Free any other memory
+    delete it_ref->gt;
+    delete it_ref->lt;
+  }
+}
+
+
 /**
  * Finalizer called when the dart LevelDB instance is not reachable.
+ *
  * */
 static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
   IteratorRef* it_ref = (IteratorRef*) peer;
 
-  assert(it_ref->is_paused);
-  assert(it_ref->thread == 0);
-  assert(it_ref->db_ref == NULL);
+  iteratorPauseAndJoin(it_ref);
+  iteratorFinalize(it_ref);
 
   delete it_ref;
 }
@@ -474,6 +515,7 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, lim
   it_ref->thread = 0;
   it_ref->is_seek_done = false;
   it_ref->count = 0;
+  it_ref->is_finalized = false;
 
   leveldb::ReadOptions options;
   Dart_GetNativeBooleanArgument(arguments, 4, &options.fill_cache);
@@ -554,10 +596,7 @@ void iteratorPause(Dart_NativeArguments arguments) {
   IteratorRef* it_ref;
   Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
 
-  it_ref->is_paused = true;
-
-  int rc = pthread_join(it_ref->thread, NULL);
-  it_ref->thread = 0;
+  iteratorPauseAndJoin(it_ref);
 
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_ExitScope();
@@ -571,17 +610,8 @@ void iteratorCancel(Dart_NativeArguments arguments) {
   IteratorRef* it_ref;
   Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
 
-  it_ref->is_paused = true;
-
-  int rc = pthread_join(it_ref->thread, NULL);
-  it_ref->thread = 0;
-
-  delete it_ref->iterator;
-  dec_ref(it_ref->db_ref);
-  it_ref->db_ref = NULL;
-
-  delete it_ref->gt;
-  delete it_ref->lt;
+  iteratorPauseAndJoin(it_ref);
+  iteratorFinalize(it_ref);
 
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_ExitScope();
