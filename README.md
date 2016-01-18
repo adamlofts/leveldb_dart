@@ -30,7 +30,7 @@ First you need to install and build leveldb_dart.
 $ apt-get install libleveldb-dev
 $ git clone https://github.com/adamlofts/leveldb_dart.git
 $ cd leveldb_dart
-$ make
+$ DART_SDK=/path/to/dart-sdk make
 ```
 
 Now add leveldb_dart as a path dependency in your pubspec.yaml file.
