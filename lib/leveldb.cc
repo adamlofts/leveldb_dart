@@ -44,11 +44,17 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
 }
 
 
+/**
+ * We hold 2 refcounts to a database.
+ * ref_count is a normal ref count for the DBRef structure.
+ * open_ref_count is the number of active references to the open db. The db is closed when open_ref_count hits 0
+ * */
 struct DBRef {
   leveldb::DB *db;
 
-  bool is_closed; // Guarded
-  int ref_count; // Guarded
+  bool is_close_called;
+  int open_ref_count; // Number of references needing the db open.
+  int ref_count; // Number of references to DBRef
   std::mutex mtx; // mutex for ref_count
 };
 
@@ -80,38 +86,55 @@ struct IteratorRef {
 };
 
 
-/**
- * Drop a reference to db. If this is the last reference then the db will be closed. Thread safe
- **/
-static void dec_ref(DBRef *db_ref) {
-  bool is_closing = false;
+static void add_ref(DBRef* db_ref) {
+  db_ref->mtx.lock();
+  db_ref->ref_count += 1;
+  db_ref->mtx.unlock();
+}
+
+
+static void dec_ref(DBRef* db_ref) {
+  bool is_zero;
   db_ref->mtx.lock();
   db_ref->ref_count -= 1;
-  if (db_ref->ref_count == 0) {
-    is_closing = true;
-    db_ref->is_closed = true;
-  }
+  is_zero = db_ref->ref_count == 0;
   db_ref->mtx.unlock();
-  if (is_closing) {
-    delete db_ref->db;
-    db_ref->db = NULL;
+
+  if (is_zero) {
+    delete db_ref;
   }
 }
 
 
 /**
- * Take a reference to db. If successful then the db will not be closed before you call dec_ref(). Thread safe.
+ * Take a reference to an open db. If successful then the db will not be closed before you call dec_open_ref(). Thread safe.
  * If this function returns true then the db has already been closed and your reference is not valid.
  **/
-static bool inc_ref(DBRef *db_ref) {
-  bool is_closed;
+static bool add_open_ref(DBRef* db_ref) {
+  bool is_closed = true;
   db_ref->mtx.lock();
-  is_closed = db_ref->is_closed;
-  if (!is_closed) {
-    db_ref->ref_count += 1;
+  if (db_ref->open_ref_count > 0) {
+    db_ref->open_ref_count += 1;
+    is_closed = false;
   }
   db_ref->mtx.unlock();
   return is_closed;
+}
+
+
+/**
+ * Drop a reference to db an open. If this is the last reference then the db will be closed. Thread safe
+ **/
+static void dec_open_ref(DBRef *db_ref) {
+  bool is_closing;
+  db_ref->mtx.lock();
+  db_ref->open_ref_count -= 1;
+  is_closing = db_ref->open_ref_count == 0;
+  db_ref->mtx.unlock();
+
+  if (is_closing) {
+    delete db_ref->db;
+  }
 }
 
 
@@ -122,17 +145,16 @@ static void NativeDBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHa
   DBRef* db_ref = (DBRef*) peer;
 
   // It is possible that db is still open if the user forgot to close()
-  bool is_closed;
+  bool is_close_called;
   db_ref->mtx.lock();
-  is_closed = db_ref->is_closed;
+  is_close_called = db_ref->is_close_called;
   db_ref->mtx.unlock();
-
-  if (!is_closed) {
-    printf("WARNING: LevelDB is not closed in finalizer. Calling close() for you.\n");
-    dec_ref(db_ref);
+  if (!is_close_called) {
+    dec_open_ref(db_ref);
   }
 
-  delete db_ref;
+  // Drop the general ref.
+  dec_ref(db_ref);
 }
 
 
@@ -173,7 +195,8 @@ static void iteratorFinalize(IteratorRef *it_ref) {
     // First delete the iterator object
     delete it_ref->iterator;
 
-    // Drop the db reference.
+    // Drop the db open and general reference.
+    dec_open_ref(it_ref->db_ref);
     dec_ref(it_ref->db_ref);
 
     // Free any other memory
@@ -203,7 +226,12 @@ int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, D
   if (msg == 2 &&
       message->value.as_array.length == 3) { // close()
 
-    dec_ref(db_ref);
+    db_ref->mtx.lock();
+    db_ref->is_close_called = true;
+    db_ref->mtx.unlock();
+
+    // Drop the open reference taken in init()
+    dec_open_ref(db_ref);
 
     Dart_CObject result;
     result.type = Dart_CObject_kInt32;
@@ -335,8 +363,9 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
       assert(status.ok());
 
       DBRef* db_ref = new DBRef();
-      db_ref->ref_count = 1;
-      db_ref->is_closed = false;
+      db_ref->ref_count = 1; // Dropped in finalize()
+      db_ref->is_close_called = false;
+      db_ref->open_ref_count = 1; // Dropped in close() (or if not called in finalize())
       db_ref->db = new_db;
 
       Dart_CObject result;
@@ -362,12 +391,12 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
   if (db_ref != NULL) {
     // Take a reference whilst in the handler function. This means the DB will not be closed during the handling of the
     // message.
-    bool is_closed = inc_ref(db_ref);
+    bool is_closed = add_open_ref(db_ref);
     if (is_closed) {
       error = -1;
     } else {
       error = levelDBServiceHandler(reply_port_id, db_ref, msg, message);
-      dec_ref(db_ref);
+      dec_open_ref(db_ref);
     }
   }
   if (error < 0) {
@@ -502,12 +531,16 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, lim
   Dart_GetNativeIntegerArgument(arguments, 1, &value);
   DBRef* db_ref = (DBRef *) value;
 
-  bool is_closed = inc_ref(db_ref);
+  // Take the open reference.
+  bool is_closed = add_open_ref(db_ref);
   if (is_closed) {
     Dart_SetReturnValue(arguments, Dart_NewInteger(-1));
     Dart_ExitScope();
     return;
   }
+
+  // Take the general reference
+  add_ref(db_ref);
 
   IteratorRef* it_ref = new IteratorRef();
   it_ref->db_ref = db_ref;

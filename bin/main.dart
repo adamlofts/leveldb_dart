@@ -27,4 +27,6 @@ Future main() async {
   await for (var v in s) {
     print("IT: ${v.runtimeType} ${v.toString()}");
   }
+
+  await db.close();
 }

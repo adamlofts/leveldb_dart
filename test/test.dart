@@ -122,8 +122,12 @@ void main() {
     await db1.put(fromString("b"), fromString("1"));
     await db1.put(fromString("c"), fromString("1"));
 
-    await for (var row in db1.getItems()) {
-      throw new Exception("OH NO");
+    try {
+      await for (var row in db1.getItems()) {
+        throw new Exception("OH NO");
+      }
+    } catch (e) {
+      // Pass
     }
   });
 
