@@ -42,4 +42,4 @@ dependencies:
     path: /my/path/to/leveldb_dart
 ```
 
-Check out the tests for example usage.
+Check out [bin/main.dart](bin/main.dart) for example usage.
