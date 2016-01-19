@@ -15,24 +15,18 @@ Future<LevelDB> openTestDB({int index: 0}) async {
   return (await LevelDB.open('/tmp/test-level-db-dart-$index'));
 }
 
-Uint8List fromString(String v) {
-  return new Uint8List.fromList(UTF8.encode(v));
-}
-
 void main() {
   test('LevelDB', () async {
     LevelDB db = await openTestDB();
 
-    await db.put(fromString("k1"), fromString("v"));
-    await db.put(fromString("k2"), fromString("v"));
+    await db.put("k1", "v");
+    await db.put("k2", "v");
 
-    expect(await db.get(fromString("k1")), equals(fromString("v")));
+    expect(await db.get("k1"), equals("v"));
     List keys = await db.getKeys().toList();
-    Uint8List key = keys.first;
-    String keyString = UTF8.decode(key);
-    expect(keyString, equals("k1"));
+    expect(keys.first, equals("k1"));
 
-    var v = await db.get(fromString("DOESNOTEXIST"));
+    var v = await db.get("DOESNOTEXIST");
     expect(v, equals(null));
 
     // All keys
@@ -78,9 +72,9 @@ void main() {
     LevelDB db1 = await openTestDB();
     LevelDB db2 = await openTestDB(index: 1);
 
-    await db1.put(fromString("a"), fromString("1"));
+    await db1.put("a", "1");
 
-    var v = await db2.get(fromString("a"));
+    var v = await db2.get("a");
     expect(v, equals(null));
 
     await db1.close();
@@ -90,9 +84,9 @@ void main() {
   test('Usage after close()', () async {
     LevelDB db1 = await openTestDB();
     await db1.close();
-    expect(db1.get(fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
-    expect(db1.delete(fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
-    expect(db1.put(fromString("SOME KEY"), fromString("SOME KEY")), throwsA(const LevelDBClosedError()));
+    expect(db1.get("SOME KEY"), throwsA(const LevelDBClosedError()));
+    expect(db1.delete("SOME KEY"), throwsA(const LevelDBClosedError()));
+    expect(db1.put("SOME KEY", "SOME KEY"), throwsA(const LevelDBClosedError()));
     expect(db1.close(), throwsA(const LevelDBClosedError()));
 
     try {
@@ -118,9 +112,9 @@ void main() {
 
   test('Exception inside iteration', () async {
     LevelDB db1 = await openTestDB();
-    await db1.put(fromString("a"), fromString("1"));
-    await db1.put(fromString("b"), fromString("1"));
-    await db1.put(fromString("c"), fromString("1"));
+    await db1.put("a", "1");
+    await db1.put("b", "1");
+    await db1.put("c", "1");
 
     try {
       await for (var row in db1.getItems()) {
@@ -128,7 +122,26 @@ void main() {
       }
     } catch (e) {
       // Pass
+    } finally {
+      await db1.close();
     }
   });
 
+  test('Test with None encoding', () async {
+    LevelDB db1 = await openTestDB();
+    Uint8List v = new Uint8List.fromList(UTF8.encode("key1"));
+
+    await db1.put(v, v, keyEncoding: const LevelEncodingNone(), valueEncoding: const LevelEncodingNone());
+
+    String s = await db1.get("key1");
+    expect(s, equals("key1"));
+
+    String s2 = await db1.get("key1", keyEncoding: const LevelEncodingAscii());
+    expect(s2, equals("key1"));
+
+    Uint8List v2 = await db1.get(v, keyEncoding: const LevelEncodingNone(), valueEncoding: const LevelEncodingNone());
+    expect(v2, equals(v));
+
+    await db1.delete(v, keyEncoding: const LevelEncodingNone());
+  });
 }

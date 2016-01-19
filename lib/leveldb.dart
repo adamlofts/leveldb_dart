@@ -7,6 +7,7 @@ library leveldb;
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
+import 'dart:convert';
 
 import 'dart-ext:leveldb';
 
@@ -22,6 +23,35 @@ class LevelDBClosedError extends LevelDBError {
 
 class LevelDBIOError extends LevelDBError {
   const LevelDBIOError() : super("IOError");
+}
+
+abstract class LevelEncoding {
+  Uint8List _encode(var v);
+  _decode(Uint8List v);
+}
+
+/**
+ * This encoding expects a string.
+ */
+class LevelEncodingUtf8 implements LevelEncoding {
+  const LevelEncodingUtf8();
+  Uint8List _encode(String v) => new Uint8List.fromList(UTF8.encode(v));
+  String _decode(Uint8List v) => UTF8.decode(v);
+}
+
+class LevelEncodingAscii implements LevelEncoding {
+  const LevelEncodingAscii();
+  Uint8List _encode(String v) => new Uint8List.fromList(const AsciiCodec().encode(v));
+  String _decode(Uint8List v) => const AsciiCodec().decode(v);
+}
+
+/**
+ * This encoding expects to be passed a Uint8List
+ */
+class LevelEncodingNone implements LevelEncoding {
+  const LevelEncodingNone();
+  Uint8List _encode(Uint8List v) => v;
+  Uint8List _decode(Uint8List v) => v;
 }
 
 class _Iterator extends NativeIterator {
@@ -50,6 +80,8 @@ class LevelDB extends NativeDB {
 
   static SendPort _newServicePort() native "DB_ServicePort";
   void _init(int ptr) native "DB_Init";
+
+  static const _ENCODING = const LevelEncodingUtf8();
 
   /**
    * Internal constructor. Use LevelDB::open().
@@ -118,14 +150,14 @@ class LevelDB extends NativeDB {
     return completer.future;
   }
 
-  Future<Uint8List> get(Uint8List key) {
+  get(var key, { LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
     var args = new List(4);
     args[0] = replyPort.sendPort;
     args[1] = 3;
     args[2] = _ptr;
-    args[3] = key;
+    args[3] = keyEncoding._encode(key);
 
     replyPort.handler = (result) {
       replyPort.close();
@@ -135,22 +167,23 @@ class LevelDB extends NativeDB {
       if (result == 0) { // key not found
         completer.complete(null);
       } else if (result != null) {
-        completer.complete(result);
+        completer.complete(valueEncoding._decode(result));
       }
     };
     _servicePort.send(args);
     return completer.future;
   }
 
-  Future put(Uint8List key, Uint8List value, { bool sync: false }) {
+
+  Future put(key, value, { bool sync: false, LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
     var args = new List(6);
     args[0] = replyPort.sendPort;
     args[1] = 4;
     args[2] = _ptr;
-    args[3] = key;
-    args[4] = value;
+    args[3] = keyEncoding._encode(key);
+    args[4] = valueEncoding._encode(value);
     args[5] = sync;
 
     replyPort.handler = (result) {
@@ -164,14 +197,14 @@ class LevelDB extends NativeDB {
     return completer.future;
   }
 
-  Future delete(Uint8List key) {
+  Future delete(key, { LevelEncoding keyEncoding: _ENCODING }) {
     var completer = new Completer();
     var replyPort = new RawReceivePort();
     var args = new List(4);
     args[0] = replyPort.sendPort;
     args[1] = 5;
     args[2] = _ptr;
-    args[3] = key;
+    args[3] = keyEncoding._encode(key);
 
     replyPort.handler = (result) {
       replyPort.close();
@@ -186,8 +219,11 @@ class LevelDB extends NativeDB {
 
   /**
    * Iterate through the db returning (key, value) tuples.
+   *
+   * FIXME: For now the parameters have to be dart strings.
    */
-  Stream<List<Uint8List>> getItems({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true }) {
+  Stream<List> getItems({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
+      LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
     RawReceivePort replyPort = new RawReceivePort();
     _Iterator iterator = _Iterator._new(
         _ptr,
@@ -200,7 +236,7 @@ class LevelDB extends NativeDB {
         lt == null
     );
 
-    StreamController<List<Uint8List>> controller = new StreamController<List<Uint8List>>(
+    StreamController<List> controller = new StreamController<List>(
       onListen: () => iterator.resume(),
       onPause: () => iterator.pause(),
       onResume: () => iterator.resume(),
@@ -222,17 +258,25 @@ class LevelDB extends NativeDB {
         return;
       }
 
-      controller.add(result);
+      // FIXME: Would be good to avoid allocation if no decoding required.
+      List ret = new List(2);
+      ret[0] = keyEncoding._decode(result[0]);
+      ret[1] = valueEncoding._decode(result[1]);
+      controller.add(ret);
     };
 
     return controller.stream;
   }
 
   /**
-   * Some pretty API below. Not stable.
+   * Some pretty API.
    */
-  Stream<Uint8List> getKeys({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true }) =>
-      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache).map((List<Uint8List> item) => item[0]);
-  Stream<Uint8List> getValues({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true }) =>
-      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache).map((List<Uint8List> item) => item[1]);
+  Stream getKeys({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
+    LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING}) =>
+      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
+          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List item) => item[0]);
+  Stream getValues({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
+    LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING}) =>
+      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
+          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List item) => item[1]);
 }
