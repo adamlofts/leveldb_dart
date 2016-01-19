@@ -117,7 +117,7 @@ void main() {
     await db1.put("c", "1");
 
     try {
-      await for (var row in db1.getItems()) {
+      await for (var _ in db1.getItems()) {
         throw new Exception("OH NO");
       }
     } catch (e) {

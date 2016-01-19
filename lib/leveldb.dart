@@ -56,9 +56,9 @@ class LevelEncodingNone implements LevelEncoding {
 
 class _Iterator extends NativeIterator {
 
-  static _Iterator _new(int ptr, SendPort port, int limit, bool fillCache, String gt, bool is_gt_closed, String lt, bool is_lt_closed) {
+  static _Iterator _new(int ptr, SendPort port, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed) {
     _Iterator it = new _Iterator();
-    int v = it._init(ptr, port, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed);
+    int v = it._init(ptr, port, limit, fillCache, gt, isGtClosed, lt, isLtClosed);
     LevelDBError e = LevelDB._getError(v);
     if (e != null) {
       throw e;
@@ -66,7 +66,7 @@ class _Iterator extends NativeIterator {
     return it;
   }
 
-  int _init(int ptr, SendPort port, int limit, bool fillCache, String gt, bool is_gt_closed, String lt, bool is_lt_closed) native "Iterator_New";
+  int _init(int ptr, SendPort port, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed) native "Iterator_New";
 
   void pause() native "Iterator_Pause";
   void resume() native "Iterator_Resume";

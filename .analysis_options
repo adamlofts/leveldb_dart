@@ -1,0 +1,8 @@
+linter:
+  rules:
+    - camel_case_types
+    - empty_constructor_bodies
+    - unnecessary_getters_setters
+    - non_constant_identifier_names
+
+
