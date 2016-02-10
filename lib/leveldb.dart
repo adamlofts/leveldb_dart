@@ -68,6 +68,7 @@ class _Iterator extends NativeIterator {
 
   int _init(int ptr, SendPort port, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed) native "Iterator_New";
 
+  void setSeq(int seq) native "Iterator_SetSeq";
   void pause() native "Iterator_Pause";
   void resume() native "Iterator_Resume";
   void cancel() native "Iterator_Cancel";
@@ -225,6 +226,7 @@ class LevelDB extends NativeDB {
   Stream<List> getItems({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
       LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
     RawReceivePort replyPort = new RawReceivePort();
+    int seq = 0;
     _Iterator iterator = _Iterator._new(
         _ptr,
         replyPort.sendPort,
@@ -258,12 +260,14 @@ class LevelDB extends NativeDB {
         controller.close();
         return;
       }
-
       // FIXME: Would be good to avoid allocation if no decoding required.
       List ret = new List(2);
       ret[0] = keyEncoding._decode(result[0]);
       ret[1] = valueEncoding._decode(result[1]);
       controller.add(ret);
+      seq += 1;
+
+      iterator.setSeq(seq);
     };
 
     return controller.stream;

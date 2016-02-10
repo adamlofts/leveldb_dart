@@ -14,6 +14,7 @@ using namespace std;     // (or using namespace std if you want to use more of s
 #include "leveldb/filter_policy.h"
 
 const int BLOOM_BITS_PER_KEY = 10;
+const int MAX_DART_SEQ_DELTA = 5000; // Max number of buffers allowed in the queue.
 
 Dart_NativeFunction ResolveName(Dart_Handle name,
                                 int argc,
@@ -64,12 +65,12 @@ struct IteratorRef {
   leveldb::Iterator *iterator;
   Dart_Port reply_port_id;
 
-  pthread_t thread;
-
-  bool is_paused;
-  std::mutex mtx; // mutex for is_paused
-
-  bool is_finalized;
+  std::mutex mtx;
+  pthread_t thread; // Guarded
+  bool is_paused; // Guarded
+  int64_t seq; // Guarded
+  int64_t dart_seq; // Guarded
+  bool is_finalized; // Guarded
 
   // Iterator params
   int64_t limit;
@@ -166,18 +167,23 @@ Dart_Handle HandleError(Dart_Handle handle) {
 }
 
 
+/**
+ * If the worker is running then ask it to stop and wait for it to do so.
+ */
 static void iteratorPauseAndJoin(IteratorRef *it_ref) {
   bool is_pausing = false;
+  pthread_t thread;
   it_ref->mtx.lock();
   if (!it_ref->is_paused) {
     is_pausing = true;
     it_ref->is_paused = true;
+    thread = it_ref->thread;
+    it_ref->thread = 0;
   }
   it_ref->mtx.unlock();
 
   if (is_pausing) {
-    int rc = pthread_join(it_ref->thread, NULL);
-    it_ref->thread = 0;
+    int rc = pthread_join(thread, NULL);
   }
 }
 
@@ -466,23 +472,66 @@ void* IteratorWork(void *data) {
 
   leveldb::Slice end_slice = leveldb::Slice((char*)it_ref->lt, it_ref->lt_len);
 
-  while (!it_ref->is_paused && it->Valid()) {
-    if (it_ref->limit >= 0 && it_ref->count >= it_ref->limit) {
+  // When the thread leaves this loop it_ref->is_paused MUST be true and it_ref->thread MUST be 0. These changes are
+  // either made by this thread holding the lock or by another thread holding the lock.
+  while (true) {
+
+    it_ref->mtx.lock();
+
+    // If the thread is not paused and the buffer is full then pause the thread
+    bool is_buffer_full = (it_ref->seq - it_ref->dart_seq) > MAX_DART_SEQ_DELTA;
+    if (is_buffer_full && !it_ref->is_paused) {
+      it_ref->thread = 0;
+      it_ref->is_paused = true;
+    }
+
+    // If we have been paused either by a full buffer or another thread then leave the loop.
+    bool is_break_loop = it_ref->is_paused;
+    it_ref->mtx.unlock();
+
+    if (is_break_loop) {
       break;
     }
 
-    leveldb::Slice key = it->key();
-    leveldb::Slice value = it->value();
+    bool is_valid = it->Valid();
+    bool is_limit_reached = it_ref->limit >= 0 && it_ref->count >= it_ref->limit;
+    bool is_query_limit_reached = false;
+    leveldb::Slice key;
+    leveldb::Slice value;
 
-    // Check if key is equal to end slice
-    if (it_ref->lt_len > 0) {
-      int cmp = key.compare(end_slice);
-      if (cmp == 0 && !it_ref->is_lt_closed) {  // key == end_slice and not closed
-        break;
+    if (is_valid) {
+      key = it->key();
+      value = it->value();
+
+      // Check if key is equal to end slice
+      if (it_ref->lt_len > 0) {
+        int cmp = key.compare(end_slice);
+        if (cmp == 0 && !it_ref->is_lt_closed) {  // key == end_slice and not closed
+          is_query_limit_reached = true;
+        }
+        if (cmp > 0) { // key > end_slice
+          is_query_limit_reached = true;
+        }
       }
-      if (cmp > 0) { // key > end_slice
-        break;
+    }
+
+    // If the iterator has moved past the end or the limit reached  or the query parameters reached
+    // then send the finished message and shut down.
+    if (!is_valid || is_limit_reached || is_query_limit_reached) {
+
+      // Send the close message.
+      Dart_CObject eos;
+      eos.type = Dart_CObject_kInt32;
+      eos.value.as_int32 = 0;
+      Dart_PostCObject(it_ref->reply_port_id, &eos);
+
+      it_ref->mtx.lock();
+      if (!it_ref->is_paused) {
+        it_ref->thread = 0;
+        it_ref->is_paused = true;
       }
+      it_ref->mtx.unlock();
+      break;
     }
 
     Dart_CObject* values[2];
@@ -512,16 +561,36 @@ void* IteratorWork(void *data) {
     // Dart_PostCObject has copied its data.
     Dart_PostCObject(it_ref->reply_port_id, &result);
 
+    // Increase the seq
+    it_ref->mtx.lock();
+    it_ref->seq = it_ref->seq + 1;
+    it_ref->mtx.unlock();
+
     it_ref->count += 1;
     it->Next();
   }
-
-  // Send end of stream.
-  Dart_CObject eos;
-  eos.type = Dart_CObject_kInt32;
-  eos.value.as_int32 = 0;
-  Dart_PostCObject(it_ref->reply_port_id, &eos);
 }
+
+
+/**
+ * Starts the worker thread up (if it has not alread started)
+ */
+static void iteratorStartWork(IteratorRef *it_ref) {
+  it_ref->mtx.lock();
+  if (it_ref->is_paused) {
+    it_ref->is_paused = false;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+    int rc = pthread_create(&it_ref->thread, &attr, IteratorWork, (void*)it_ref);
+    assert(rc == 0);
+
+    pthread_attr_destroy(&attr);
+  }
+  it_ref->mtx.unlock();
+}
+
 
 void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed)
   Dart_EnterScope();
@@ -543,6 +612,8 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, lim
   add_ref(db_ref);
 
   IteratorRef* it_ref = new IteratorRef();
+  it_ref->seq = 0;
+  it_ref->dart_seq = 0;
   it_ref->db_ref = db_ref;
   it_ref->is_paused = true;
   it_ref->thread = 0;
@@ -605,17 +676,7 @@ void iteratorResume(Dart_NativeArguments arguments) {
   IteratorRef* it_ref;
   Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
 
-  assert(it_ref->is_paused);
-  assert(it_ref->thread == 0);
-
-  it_ref->is_paused = false;
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-  int rc = pthread_create(&it_ref->thread, &attr, IteratorWork, (void*)it_ref);
-
-  pthread_attr_destroy(&attr);
+  iteratorStartWork(it_ref);
 
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_ExitScope();
@@ -651,6 +712,36 @@ void iteratorCancel(Dart_NativeArguments arguments) {
 }
 
 
+void iteratorSetSeq(Dart_NativeArguments arguments) {
+  Dart_EnterScope();
+
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  IteratorRef* it_ref;
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
+
+  int64_t dart_seq;
+  Dart_GetNativeIntegerArgument(arguments, 1, &dart_seq);
+
+  // Update the dart seq value and wake up the thread if the seq's are equal (i.e. dart has send out all of the
+  // rows into the stream).
+  it_ref->mtx.lock();
+  it_ref->dart_seq = dart_seq;
+
+  bool is_wake_required = (it_ref->seq - dart_seq) < 1 && !it_ref->is_finalized;
+
+  // If the iterator is buffer paused then maybe wake up the iterator.
+  it_ref->mtx.unlock();
+
+  // This call can be outside the lock because it is safe to call iteratorStartWork() twice.
+  if (is_wake_required) {
+    iteratorStartWork(it_ref);
+  }
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
 struct FunctionLookup {
   const char* name;
   Dart_NativeFunction function;
@@ -665,6 +756,7 @@ FunctionLookup function_list[] = {
     {"Iterator_Resume", iteratorResume},
     {"Iterator_Pause", iteratorPause},
     {"Iterator_Cancel", iteratorCancel},
+    {"Iterator_SetSeq", iteratorSetSeq},
 
     {NULL, NULL}};
 
