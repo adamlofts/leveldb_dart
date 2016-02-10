@@ -240,7 +240,8 @@ class LevelDB extends NativeDB {
       onListen: () => iterator.resume(),
       onPause: () => iterator.pause(),
       onResume: () => iterator.resume(),
-      onCancel: () => iterator.cancel()
+      onCancel: () => iterator.cancel(),
+      sync: true
     );
 
     replyPort.handler = (result) {
