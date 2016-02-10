@@ -7,3 +7,5 @@ packages
 .idea/tasks.xml
 *.so
 *.o
+.idea/libraries/*.xml
+
