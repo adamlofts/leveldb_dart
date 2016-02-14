@@ -14,9 +14,9 @@ Introduction
 
 **[LevelDB](https://github.com/google/leveldb)** is a simple key/value data store built by Google, inspired by BigTable. It's used in Google Chrome and many other products. LevelDB supports arbitrary byte arrays as both keys and values, singular *get*, *put* and *delete* operations, *batched put and delete*, bi-directional iterators and simple compression using the very fast [Snappy](http://google.github.io/snappy/) algorithm.
 
-**leveldb_dart** aims to expose the features of LevelDB in a **Dart-friendly way**.
+**leveldb_dart** aims to expose the features of LevelDB in a **Dart-friendly way**. All operations return Futures and Streams allowing use of <code>await</code> and <code>await for</code> language features.
 
-LevelDB stores entries **sorted lexicographically by keys**. This makes leveldb_darts's <a href="#createReadStream"><code>ReadStream</code></a> interface a very powerful query mechanism.
+LevelDB stores entries **sorted lexicographically by keys**. This makes leveldb_darts's <code>getItems</code> interface a very powerful query mechanism.
 
 <a name="basic"></a>
 Basic usage (Ubuntu / Debian)
