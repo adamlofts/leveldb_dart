@@ -54,11 +54,42 @@ class LevelEncodingNone implements LevelEncoding {
   Uint8List _decode(Uint8List v) => v;
 }
 
-class _Iterator extends NativeIterator {
+class LevelIterator extends NativeIterator {
 
-  static _Iterator _new(int ptr, SendPort port, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed) {
-    _Iterator it = new _Iterator();
-    int v = it._init(ptr, port, limit, fillCache, gt, isGtClosed, lt, isLtClosed);
+  static const int MAX_ROWS = 5000;
+
+  final LevelEncoding keyEncoding;
+  final LevelEncoding valueEncoding;
+
+  StreamController<List> _controller;
+
+  bool isStreaming;
+
+  LevelIterator(LevelEncoding this.keyEncoding, LevelEncoding this.valueEncoding) {
+    _controller = new StreamController<List>(
+        onListen: () {
+          isStreaming = true;
+          _getRows(MAX_ROWS);
+        },
+        onPause: () {
+          isStreaming = false;
+        },
+        onResume: () {
+          isStreaming = true;
+          _getRows(MAX_ROWS);
+        },
+        onCancel: () {
+          isStreaming = false;
+        },
+        sync: true
+    );
+  }
+
+  Stream<List> get stream => _controller.stream;
+
+  static LevelIterator _new(int ptr, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) {
+    LevelIterator it = new LevelIterator(keyEncoding, valueEncoding);
+    int v = it._init(ptr, limit, fillCache, gt, isGtClosed, lt, isLtClosed);
     LevelDBError e = LevelDB._getError(v);
     if (e != null) {
       throw e;
@@ -66,13 +97,48 @@ class _Iterator extends NativeIterator {
     return it;
   }
 
-  int _init(int ptr, SendPort port, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed) native "Iterator_New";
+  int _init(int ptr, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed) native "Iterator_New";
 
-  void setSeq(int seq) native "Iterator_SetSeq";
-  void pause() native "Iterator_Pause";
-  void resume() native "Iterator_Resume";
-  void cancel() native "Iterator_Cancel";
+  void _getRows(int maxRows) {
+    RawReceivePort port = new RawReceivePort();
+    port.handler = (result) => _handler(port, result);
+    _getRowsNative(port.sendPort, maxRows);
+  }
+
+  void _getRowsNative(SendPort port, int maxRows) native "Iterator_GetRows";
+
+  void _handler(RawReceivePort port, result) {
+    LevelDBError e = LevelDB._getError(result);
+    if (e != null) {
+      port.close();
+      _controller.addError(e);
+      _controller.close();
+      return;
+    }
+
+    if (result == 0) { // Stream finished
+      port.close();
+      _controller.close();
+      return;
+    }
+
+    if (result == 1) { // maxRows reached
+      port.close();
+      if (isStreaming) {
+        _getRows(MAX_ROWS); // Get some more rows.
+      }
+      return;
+    }
+
+    //    // FIXME: Would be good to avoid allocation if no decoding required.
+    List ret = new List(2);
+    ret[0] = keyEncoding._decode(result[0]);
+    ret[1] = valueEncoding._decode(result[1]);
+    _controller.add(ret);
+  }
 }
+
+const _ENCODING = const LevelEncodingUtf8();
 
 class LevelDB extends NativeDB {
 
@@ -82,7 +148,6 @@ class LevelDB extends NativeDB {
   static SendPort _newServicePort() native "DB_ServicePort";
   void _init(int ptr) native "DB_Init";
 
-  static const _ENCODING = const LevelEncodingUtf8();
 
   /**
    * Internal constructor. Use LevelDB::open().
@@ -225,52 +290,20 @@ class LevelDB extends NativeDB {
    */
   Stream<List> getItems({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
       LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
-    RawReceivePort replyPort = new RawReceivePort();
-    int seq = 0;
-    _Iterator iterator = _Iterator._new(
+
+    LevelIterator iterator = LevelIterator._new(
         _ptr,
-        replyPort.sendPort,
         limit,
         fillCache,
         gt == null ? gte : gt,
         gt == null,
         lt == null ? lte : lt,
-        lt == null
+        lt == null,
+        keyEncoding,
+        valueEncoding
     );
 
-    StreamController<List> controller = new StreamController<List>(
-      onListen: () => iterator.resume(),
-      onPause: () => iterator.pause(),
-      onResume: () => iterator.resume(),
-      onCancel: () => iterator.cancel(),
-      sync: true
-    );
-
-    replyPort.handler = (result) {
-      LevelDBError e = _getError(result);
-      if (e != null) {
-        replyPort.close();
-        controller.addError(e);
-        controller.close();
-        return;
-      }
-
-      if (result == 0) { // Stream finished
-        replyPort.close();
-        controller.close();
-        return;
-      }
-      // FIXME: Would be good to avoid allocation if no decoding required.
-      List ret = new List(2);
-      ret[0] = keyEncoding._decode(result[0]);
-      ret[1] = valueEncoding._decode(result[1]);
-      controller.add(ret);
-      seq += 1;
-
-      iterator.setSeq(seq);
-    };
-
-    return controller.stream;
+    return iterator._controller.stream;
   }
 
   /**

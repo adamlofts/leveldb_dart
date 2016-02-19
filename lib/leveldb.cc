@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <memory>
 #include <mutex>
+
+#include <queue>
+#include <list>
+
 #include <string>
 using namespace std;     // (or using namespace std if you want to use more of std.)
 
@@ -14,7 +18,6 @@ using namespace std;     // (or using namespace std if you want to use more of s
 #include "leveldb/filter_policy.h"
 
 const int BLOOM_BITS_PER_KEY = 10;
-const int MAX_DART_SEQ_DELTA = 5000; // Max number of buffers allowed in the queue.
 
 Dart_NativeFunction ResolveName(Dart_Handle name,
                                 int argc,
@@ -45,31 +48,33 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
 }
 
 
-/**
- * We hold 2 refcounts to a database.
- * ref_count is a normal ref count for the DBRef structure.
- * open_ref_count is the number of active references to the open db. The db is closed when open_ref_count hits 0
- * */
+struct IteratorRef;
+
+
 struct DBRef {
   leveldb::DB *db;
 
-  bool is_close_called;
-  int open_ref_count; // Number of references needing the db open.
-  int ref_count; // Number of references to DBRef
-  std::mutex mtx; // mutex for ref_count
+  std::mutex mtx;
+  std::list<IteratorRef*> *iterators;  // Guarded
+  bool is_finalized;  // Guarded
+};
+
+
+struct RowRequest {
+  int64_t max_size;
+  Dart_Port reply_port_id;
 };
 
 
 struct IteratorRef {
   DBRef *db_ref;
   leveldb::Iterator *iterator;
-  Dart_Port reply_port_id;
 
   std::mutex mtx;
+  std::queue<RowRequest*> *request_queue; // Guarded
+
   pthread_t thread; // Guarded
   bool is_paused; // Guarded
-  int64_t seq; // Guarded
-  int64_t dart_seq; // Guarded
   bool is_finalized; // Guarded
 
   // Iterator params
@@ -85,87 +90,6 @@ struct IteratorRef {
   bool is_seek_done;
   int64_t count;
 };
-
-
-static void add_ref(DBRef* db_ref) {
-  db_ref->mtx.lock();
-  db_ref->ref_count += 1;
-  db_ref->mtx.unlock();
-}
-
-
-static void dec_ref(DBRef* db_ref) {
-  bool is_zero;
-  db_ref->mtx.lock();
-  db_ref->ref_count -= 1;
-  is_zero = db_ref->ref_count == 0;
-  db_ref->mtx.unlock();
-
-  if (is_zero) {
-    delete db_ref;
-  }
-}
-
-
-/**
- * Take a reference to an open db. If successful then the db will not be closed before you call dec_open_ref(). Thread safe.
- * If this function returns true then the db has already been closed and your reference is not valid.
- **/
-static bool add_open_ref(DBRef* db_ref) {
-  bool is_closed = true;
-  db_ref->mtx.lock();
-  if (db_ref->open_ref_count > 0) {
-    db_ref->open_ref_count += 1;
-    is_closed = false;
-  }
-  db_ref->mtx.unlock();
-  return is_closed;
-}
-
-
-/**
- * Drop a reference to db an open. If this is the last reference then the db will be closed. Thread safe
- **/
-static void dec_open_ref(DBRef *db_ref) {
-  bool is_closing;
-  db_ref->mtx.lock();
-  db_ref->open_ref_count -= 1;
-  is_closing = db_ref->open_ref_count == 0;
-  db_ref->mtx.unlock();
-
-  if (is_closing) {
-    delete db_ref->db;
-  }
-}
-
-
-/**
- * Finalizer called when the dart LevelDB instance is not reachable.
- * */
-static void NativeDBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
-  DBRef* db_ref = (DBRef*) peer;
-
-  // It is possible that db is still open if the user forgot to close()
-  bool is_close_called;
-  db_ref->mtx.lock();
-  is_close_called = db_ref->is_close_called;
-  db_ref->mtx.unlock();
-  if (!is_close_called) {
-    dec_open_ref(db_ref);
-  }
-
-  // Drop the general ref.
-  dec_ref(db_ref);
-}
-
-
-Dart_Handle HandleError(Dart_Handle handle) {
-  if (Dart_IsError(handle)) {
-    Dart_PropagateError(handle);
-  }
-  return handle;
-}
-
 
 /**
  * If the worker is running then ask it to stop and wait for it to do so.
@@ -188,27 +112,85 @@ static void iteratorPauseAndJoin(IteratorRef *it_ref) {
 }
 
 
+/**
+ * Finalize the iterator. Joins up with the iterator thread and removes the iterator from the db list. Thread safe
+ */
 static void iteratorFinalize(IteratorRef *it_ref) {
-  bool is_finalizing = false;
+  bool is_finalized = false;
   it_ref->mtx.lock();
-  if (!it_ref->is_finalized) {
-    is_finalizing = true;
-    it_ref->is_finalized = true;
-  }
+  is_finalized = it_ref->is_finalized;
+  it_ref->is_finalized = true;
   it_ref->mtx.unlock();
 
-  if (is_finalizing) {
-    // First delete the iterator object
-    delete it_ref->iterator;
-
-    // Drop the db open and general reference.
-    dec_open_ref(it_ref->db_ref);
-    dec_ref(it_ref->db_ref);
-
-    // Free any other memory
-    delete it_ref->gt;
-    delete it_ref->lt;
+  if (is_finalized) {
+    return;
   }
+
+  iteratorPauseAndJoin(it_ref);
+
+  delete it_ref->iterator;
+  it_ref->iterator = NULL;
+
+  // Remove the iterator from the dbs list
+  it_ref->db_ref->iterators->remove(it_ref);
+
+  // Send an error to every socket in the request queue
+  while (!it_ref->request_queue->empty()) {
+    RowRequest* request = it_ref->request_queue->front();
+
+    Dart_CObject result;
+    result.type = Dart_CObject_kInt32;
+    result.value.as_int32 = -1;
+    Dart_PostCObject(request->reply_port_id, &result);
+
+    delete it_ref->request_queue->front();
+    it_ref->request_queue->pop();
+  }
+}
+
+/**
+ * Stop all iterators, close the db.
+ * Thread safe.
+ */
+static void finalizeDB(DBRef *db_ref) {
+  bool is_finalized;
+  db_ref->mtx.lock();
+  is_finalized = db_ref->is_finalized;
+  db_ref->is_finalized = true;
+  db_ref->mtx.unlock();
+
+  if (is_finalized) {
+    return;
+  }
+
+  // Finalize every iterator. This will join with all iterator threads then the iterator will
+  // remove itself from the iterators array.
+  while (!db_ref->iterators->empty()) {
+    iteratorFinalize(db_ref->iterators->front());
+  }
+  delete db_ref->iterators;
+
+  // Close the db
+  delete db_ref->db;
+}
+
+
+/**
+ * Finalizer called when the dart LevelDB instance is not reachable.
+ * */
+static void NativeDBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+  DBRef* db_ref = (DBRef*) peer;
+
+  // It is possible that db is still open if the user forgot to close()
+  finalizeDB(db_ref);
+}
+
+
+Dart_Handle HandleError(Dart_Handle handle) {
+  if (Dart_IsError(handle)) {
+    Dart_PropagateError(handle);
+  }
+  return handle;
 }
 
 
@@ -219,8 +201,15 @@ static void iteratorFinalize(IteratorRef *it_ref) {
 static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
   IteratorRef* it_ref = (IteratorRef*) peer;
 
-  iteratorPauseAndJoin(it_ref);
   iteratorFinalize(it_ref);
+
+  // Thread is stopped. Free all memory.
+  assert(it_ref->iterator == NULL);
+  delete it_ref->gt;
+  delete it_ref->lt;
+
+  assert(it_ref->request_queue->empty());
+  delete it_ref->request_queue;
 
   delete it_ref;
 }
@@ -228,16 +217,10 @@ static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersis
 
 int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, Dart_CObject* message) {
 
-  leveldb::DB* db = db_ref->db;
   if (msg == 2 &&
       message->value.as_array.length == 3) { // close()
 
-    db_ref->mtx.lock();
-    db_ref->is_close_called = true;
-    db_ref->mtx.unlock();
-
-    // Drop the open reference taken in init()
-    dec_open_ref(db_ref);
+    finalizeDB(db_ref);
 
     Dart_CObject result;
     result.type = Dart_CObject_kInt32;
@@ -245,6 +228,8 @@ int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, D
     Dart_PostCObject(reply_port_id, &result);
     return 0;
   }
+
+  leveldb::DB* db = db_ref->db;
 
   if (msg == 3 &&
       message->value.as_array.length == 4) { // get(key)
@@ -369,9 +354,8 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
       assert(status.ok());
 
       DBRef* db_ref = new DBRef();
-      db_ref->ref_count = 1; // Dropped in finalize()
-      db_ref->is_close_called = false;
-      db_ref->open_ref_count = 1; // Dropped in close() (or if not called in finalize())
+      db_ref->iterators = new std::list<IteratorRef*>();
+      db_ref->is_finalized = false;
       db_ref->db = new_db;
 
       Dart_CObject result;
@@ -395,14 +379,10 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
 
   int32_t error = 0;
   if (db_ref != NULL) {
-    // Take a reference whilst in the handler function. This means the DB will not be closed during the handling of the
-    // message.
-    bool is_closed = add_open_ref(db_ref);
-    if (is_closed) {
+    if (db_ref->is_finalized) {
       error = -1;
     } else {
       error = levelDBServiceHandler(reply_port_id, db_ref, msg, message);
-      dec_open_ref(db_ref);
     }
   }
   if (error < 0) {
@@ -474,22 +454,45 @@ void* IteratorWork(void *data) {
 
   // When the thread leaves this loop it_ref->is_paused MUST be true and it_ref->thread MUST be 0. These changes are
   // either made by this thread holding the lock or by another thread holding the lock.
+  RowRequest *row_request = NULL;
   while (true) {
+
+    // If we have emitted max_size rows then send the done message and destroy the pop the request from the queue.
+    if (row_request != NULL && row_request->max_size == 0) {
+      Dart_CObject eos;
+      eos.type = Dart_CObject_kInt32;
+      eos.value.as_int32 = 1;
+      Dart_PostCObject(row_request->reply_port_id, &eos);
+
+      it_ref->mtx.lock();
+      it_ref->request_queue->pop(); // Removes the 1st item.
+      it_ref->mtx.unlock();
+
+      delete row_request;
+      row_request = NULL;
+    }
 
     it_ref->mtx.lock();
 
-    // If the thread is not paused and the buffer is full then pause the thread
-    bool is_buffer_full = (it_ref->seq - it_ref->dart_seq) > MAX_DART_SEQ_DELTA;
-    if (is_buffer_full && !it_ref->is_paused) {
-      it_ref->thread = 0;
-      it_ref->is_paused = true;
-    }
+    // We have been paused by another thread. Leave the loop.
+    bool is_paused = it_ref->is_paused;
 
-    // If we have been paused either by a full buffer or another thread then leave the loop.
-    bool is_break_loop = it_ref->is_paused;
+    // Peek at the next row request if NULL. If there is no next request then send the empty signal and pause the thread.
+    if (row_request == NULL) {
+      if (it_ref->request_queue->empty()) {
+        is_paused = true;
+
+        it_ref->thread = 0;
+        it_ref->is_paused = true;
+
+
+      } else {
+        row_request = it_ref->request_queue->front();
+      }
+    }
     it_ref->mtx.unlock();
 
-    if (is_break_loop) {
+    if (is_paused) {
       break;
     }
 
@@ -523,7 +526,7 @@ void* IteratorWork(void *data) {
       Dart_CObject eos;
       eos.type = Dart_CObject_kInt32;
       eos.value.as_int32 = 0;
-      Dart_PostCObject(it_ref->reply_port_id, &eos);
+      Dart_PostCObject(row_request->reply_port_id, &eos);
 
       it_ref->mtx.lock();
       if (!it_ref->is_paused) {
@@ -559,12 +562,8 @@ void* IteratorWork(void *data) {
 
     // It is OK that result is destroyed when function exits.
     // Dart_PostCObject has copied its data.
-    Dart_PostCObject(it_ref->reply_port_id, &result);
-
-    // Increase the seq
-    it_ref->mtx.lock();
-    it_ref->seq = it_ref->seq + 1;
-    it_ref->mtx.unlock();
+    Dart_PostCObject(row_request->reply_port_id, &result);
+    row_request->max_size -= 1;
 
     it_ref->count += 1;
     it->Next();
@@ -573,11 +572,11 @@ void* IteratorWork(void *data) {
 
 
 /**
- * Starts the worker thread up (if it has not alread started)
+ * Starts the worker thread up (if it has not already started)
  */
 static void iteratorStartWork(IteratorRef *it_ref) {
   it_ref->mtx.lock();
-  if (it_ref->is_paused) {
+  if (it_ref->is_paused && !it_ref->is_finalized) {
     it_ref->is_paused = false;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -592,7 +591,7 @@ static void iteratorStartWork(IteratorRef *it_ref) {
 }
 
 
-void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed)
+void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed)
   Dart_EnterScope();
 
   Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
@@ -600,41 +599,33 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, lim
   Dart_GetNativeIntegerArgument(arguments, 1, &value);
   DBRef* db_ref = (DBRef *) value;
 
-  // Take the open reference.
-  bool is_closed = add_open_ref(db_ref);
-  if (is_closed) {
+  db_ref->mtx.lock();
+  if (db_ref->is_finalized) {
     Dart_SetReturnValue(arguments, Dart_NewInteger(-1));
     Dart_ExitScope();
+    db_ref->mtx.unlock();
     return;
   }
 
-  // Take the general reference
-  add_ref(db_ref);
-
   IteratorRef* it_ref = new IteratorRef();
-  it_ref->seq = 0;
-  it_ref->dart_seq = 0;
   it_ref->db_ref = db_ref;
   it_ref->is_paused = true;
   it_ref->thread = 0;
   it_ref->is_seek_done = false;
   it_ref->count = 0;
   it_ref->is_finalized = false;
+  it_ref->request_queue = new std::queue<RowRequest*>();
 
   leveldb::ReadOptions options;
-  Dart_GetNativeBooleanArgument(arguments, 4, &options.fill_cache);
+  Dart_GetNativeBooleanArgument(arguments, 3, &options.fill_cache);
   it_ref->iterator = db_ref->db->NewIterator(options);
 
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
   Dart_SetNativeInstanceField(arg0, 0, (intptr_t) it_ref);
 
-  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
-  Dart_Port port_id;
-  Dart_SendPortGetId(arg2, &it_ref->reply_port_id);
+  Dart_GetNativeIntegerArgument(arguments, 2, &it_ref->limit);
 
-  Dart_GetNativeIntegerArgument(arguments, 3, &it_ref->limit);
-
-  Dart_Handle arg5 = Dart_GetNativeArgument(arguments, 5);
+  Dart_Handle arg5 = Dart_GetNativeArgument(arguments, 4);
   if (Dart_IsNull(arg5)) {
     it_ref->gt = NULL;
     it_ref->gt_len = 0;
@@ -647,7 +638,7 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, lim
     assert(false); // Not reached
   }
 
-  Dart_Handle arg7 = Dart_GetNativeArgument(arguments, 7);
+  Dart_Handle arg7 = Dart_GetNativeArgument(arguments, 6);
   if (Dart_IsNull(arg7)) {
     it_ref->lt = NULL;
     it_ref->lt_len = 0;
@@ -660,82 +651,49 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, replyPort, lim
     assert(false); // Not reached
   }
 
-  Dart_GetNativeBooleanArgument(arguments, 6, &it_ref->is_gt_closed);
-  Dart_GetNativeBooleanArgument(arguments, 8, &it_ref->is_lt_closed);
+  Dart_GetNativeBooleanArgument(arguments, 5, &it_ref->is_gt_closed);
+  Dart_GetNativeBooleanArgument(arguments, 7, &it_ref->is_lt_closed);
 
   Dart_NewWeakPersistentHandle(arg0, (void*) it_ref, 0 /* external_allocation_size */, NativeIteratorFinalizer);
 
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_ExitScope();
-}
+  // Add to iterators list
+  db_ref->iterators->push_back(it_ref);
 
-void iteratorResume(Dart_NativeArguments arguments) {
-  Dart_EnterScope();
-
-  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  IteratorRef* it_ref;
-  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
-
-  iteratorStartWork(it_ref);
+  db_ref->mtx.unlock();
 
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_ExitScope();
 }
 
 
-void iteratorPause(Dart_NativeArguments arguments) {
+void iteratorGetRows(Dart_NativeArguments arguments) {
   Dart_EnterScope();
 
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
   IteratorRef* it_ref;
   Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
 
-  iteratorPauseAndJoin(it_ref);
+  Dart_Port reply_port_id;
+  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 1);
+  Dart_SendPortGetId(arg2, &reply_port_id);
 
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_ExitScope();
-}
-
-
-void iteratorCancel(Dart_NativeArguments arguments) {
-  Dart_EnterScope();
-
-  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  IteratorRef* it_ref;
-  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
-
-  iteratorPauseAndJoin(it_ref);
-  iteratorFinalize(it_ref);
-
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_ExitScope();
-}
-
-
-void iteratorSetSeq(Dart_NativeArguments arguments) {
-  Dart_EnterScope();
-
-  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  IteratorRef* it_ref;
-  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
-
-  int64_t dart_seq;
-  Dart_GetNativeIntegerArgument(arguments, 1, &dart_seq);
-
-  // Update the dart seq value and wake up the thread if the seq's are equal (i.e. dart has send out all of the
-  // rows into the stream).
   it_ref->mtx.lock();
-  it_ref->dart_seq = dart_seq;
+  if (!it_ref->is_finalized) {
+    RowRequest *row_request = new RowRequest();
+    row_request->reply_port_id = reply_port_id;
+    Dart_GetNativeIntegerArgument(arguments, 2, &row_request->max_size);
 
-  bool is_wake_required = (it_ref->seq - dart_seq) < 1 && !it_ref->is_finalized;
-
-  // If the iterator is buffer paused then maybe wake up the iterator.
+    it_ref->request_queue->push(row_request);
+  } else {
+    // If we are finalized then respond that the db is closed
+    Dart_CObject result;
+    result.type = Dart_CObject_kInt32;
+    result.value.as_int32 = -1;
+    Dart_PostCObject(reply_port_id, &result);
+  }
   it_ref->mtx.unlock();
 
-  // This call can be outside the lock because it is safe to call iteratorStartWork() twice.
-  if (is_wake_required) {
-    iteratorStartWork(it_ref);
-  }
+  iteratorStartWork(it_ref);
 
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_ExitScope();
@@ -753,10 +711,7 @@ FunctionLookup function_list[] = {
     {"DB_ServicePort", dbServicePort},
 
     {"Iterator_New", iteratorNew},
-    {"Iterator_Resume", iteratorResume},
-    {"Iterator_Pause", iteratorPause},
-    {"Iterator_Cancel", iteratorCancel},
-    {"Iterator_SetSeq", iteratorSetSeq},
+    {"Iterator_GetRows", iteratorGetRows},
 
     {NULL, NULL}};
 

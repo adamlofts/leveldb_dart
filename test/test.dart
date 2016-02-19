@@ -143,5 +143,25 @@ void main() {
     expect(v2, equals(v));
 
     await db1.delete(v, keyEncoding: const LevelEncodingNone());
+
+    await db1.close();
+  });
+
+  test('Close inside iteration', () async {
+    LevelDB db1 = await openTestDB();
+    await db1.put("a", "1");
+    await db1.put("b", "1");
+
+    bool isClosedSeen = false;
+
+    try {
+      await for (var _ in db1.getItems()) {
+        await db1.close();
+      }
+    } on LevelDBClosedError catch (_) {
+      isClosedSeen = true;
+    }
+
+    expect(isClosedSeen, equals(true));
   });
 }
