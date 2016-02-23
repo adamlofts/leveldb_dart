@@ -56,16 +56,21 @@ class LevelEncodingNone implements LevelEncoding {
 
 class LevelIterator extends NativeIterator {
 
-  static const int MAX_ROWS = 5000;
+  static const int MAX_ROWS = 15000;
 
   final LevelEncoding keyEncoding;
   final LevelEncoding valueEncoding;
+  final bool isNoEncoding;
 
   StreamController<List> _controller;
 
   bool isStreaming;
 
-  LevelIterator(LevelEncoding this.keyEncoding, LevelEncoding this.valueEncoding) {
+  LevelIterator(LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
+        keyEncoding = keyEncoding,
+        valueEncoding = valueEncoding,
+        isNoEncoding = keyEncoding == LevelEncodingNone &&  valueEncoding == LevelEncodingNone {
+
     _controller = new StreamController<List>(
         onListen: () {
           isStreaming = true;
@@ -130,11 +135,14 @@ class LevelIterator extends NativeIterator {
       return;
     }
 
-    //    // FIXME: Would be good to avoid allocation if no decoding required.
-    List ret = new List(2);
-    ret[0] = keyEncoding._decode(result[0]);
-    ret[1] = valueEncoding._decode(result[1]);
-    _controller.add(ret);
+    if (isNoEncoding) {
+      _controller.add(result);
+    } else {
+      List ret = new List(2);
+      ret[0] = keyEncoding._decode(result[0]);
+      ret[1] = valueEncoding._decode(result[1]);
+      _controller.add(ret);
+    }
   }
 }
 
