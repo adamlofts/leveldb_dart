@@ -113,6 +113,24 @@ static void iteratorPauseAndJoin(IteratorRef *it_ref) {
 
 
 /**
+ * Empty the request queue sending result to each port
+ */
+static void emptyQueue(std::queue<RowRequest*> *queue, int32_t ret) {
+  while (!queue->empty()) {
+    RowRequest* request = queue->front();
+
+    Dart_CObject result;
+    result.type = Dart_CObject_kInt32;
+    result.value.as_int32 = ret;
+    Dart_PostCObject(request->reply_port_id, &result);
+
+    delete request;
+    queue->pop();
+  }
+}
+
+
+/**
  * Finalize the iterator. Joins up with the iterator thread and removes the iterator from the db list. Thread safe
  */
 static void iteratorFinalize(IteratorRef *it_ref) {
@@ -135,17 +153,7 @@ static void iteratorFinalize(IteratorRef *it_ref) {
   it_ref->db_ref->iterators->remove(it_ref);
 
   // Send an error to every socket in the request queue
-  while (!it_ref->request_queue->empty()) {
-    RowRequest* request = it_ref->request_queue->front();
-
-    Dart_CObject result;
-    result.type = Dart_CObject_kInt32;
-    result.value.as_int32 = -1;
-    Dart_PostCObject(request->reply_port_id, &result);
-
-    delete it_ref->request_queue->front();
-    it_ref->request_queue->pop();
-  }
+  emptyQueue(it_ref->request_queue, -1);
 }
 
 /**
@@ -452,8 +460,8 @@ void* IteratorWork(void *data) {
 
   leveldb::Slice end_slice = leveldb::Slice((char*)it_ref->lt, it_ref->lt_len);
 
-  // When the thread leaves this loop it_ref->is_paused MUST be true and it_ref->thread MUST be 0. These changes are
-  // either made by this thread holding the lock or by another thread holding the lock.
+  // When the thread leaves this loop it_ref->is_paused MUST be true and it_ref->thread MUST be 0 and the request queue must be
+  // empty. These changes are either made by this thread holding the lock or by another thread holding the lock.
   RowRequest *row_request = NULL;
   while (true) {
 
@@ -522,13 +530,11 @@ void* IteratorWork(void *data) {
     // then send the finished message and shut down.
     if (!is_valid || is_limit_reached || is_query_limit_reached) {
 
-      // Send the close message.
-      Dart_CObject eos;
-      eos.type = Dart_CObject_kInt32;
-      eos.value.as_int32 = 0;
-      Dart_PostCObject(row_request->reply_port_id, &eos);
-
       it_ref->mtx.lock();
+
+      // Send the close message to each request
+      emptyQueue(it_ref->request_queue, 0);
+
       if (!it_ref->is_paused) {
         it_ref->thread = 0;
         it_ref->is_paused = true;
