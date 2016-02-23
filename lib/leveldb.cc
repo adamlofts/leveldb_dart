@@ -635,26 +635,44 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCac
   if (Dart_IsNull(arg5)) {
     it_ref->gt = NULL;
     it_ref->gt_len = 0;
-  } else if (Dart_IsString(arg5)) {
-    uint8_t* s;
-    Dart_StringToUTF8(arg5, &s, &it_ref->gt_len);
-    it_ref->gt = (uint8_t*) malloc(it_ref->gt_len);
-    memcpy(it_ref->gt, s, it_ref->gt_len);
+//  } else if (Dart_IsString(arg5)) {
+//    uint8_t* s;
+//    Dart_StringToUTF8(arg5, &s, &it_ref->gt_len);
+//    it_ref->gt = (uint8_t*) malloc(it_ref->gt_len);
+//    memcpy(it_ref->gt, s, it_ref->gt_len);
   } else {
-    assert(false); // Not reached
+    Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg5);
+    assert(typed_data_type != Dart_TypedData_kInvalid);
+
+    char *data;
+    intptr_t len;
+    Dart_TypedDataAcquireData(arg5, &typed_data_type, (void**)&data, &len);
+    it_ref->gt_len = len;
+    it_ref->gt = (uint8_t*) malloc(len);
+    memcpy(it_ref->gt, data, len);
+    Dart_TypedDataReleaseData(arg5);
   }
 
-  Dart_Handle arg7 = Dart_GetNativeArgument(arguments, 6);
-  if (Dart_IsNull(arg7)) {
+  Dart_Handle arg6 = Dart_GetNativeArgument(arguments, 6);
+  if (Dart_IsNull(arg6)) {
     it_ref->lt = NULL;
     it_ref->lt_len = 0;
-  } else if (Dart_IsString(arg7)) {
-    uint8_t* s;
-    Dart_StringToUTF8(arg7, &s, &it_ref->lt_len);
-    it_ref->lt = (uint8_t*) malloc(it_ref->lt_len);
-    memcpy(it_ref->lt, s, it_ref->lt_len);
+//  } else if (Dart_IsString(arg7)) {
+//    uint8_t* s;
+//    Dart_StringToUTF8(arg7, &s, &it_ref->lt_len);
+//    it_ref->lt = (uint8_t*) malloc(it_ref->lt_len);
+//    memcpy(it_ref->lt, s, it_ref->lt_len);
   } else {
-    assert(false); // Not reached
+    Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg6);
+    assert(typed_data_type != Dart_TypedData_kInvalid);
+
+    char *data;
+    intptr_t len;
+    Dart_TypedDataAcquireData(arg6, &typed_data_type, (void**)&data, &len);
+    it_ref->lt_len = len;
+    it_ref->lt = (uint8_t*) malloc(len);
+    memcpy(it_ref->lt, data, len);
+    Dart_TypedDataReleaseData(arg6);
   }
 
   Dart_GetNativeBooleanArgument(arguments, 5, &it_ref->is_gt_closed);

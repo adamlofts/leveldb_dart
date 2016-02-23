@@ -92,9 +92,17 @@ class LevelIterator extends NativeIterator {
 
   Stream<List> get stream => _controller.stream;
 
-  static LevelIterator _new(int ptr, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) {
+  static LevelIterator _new(int ptr, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) {
     LevelIterator it = new LevelIterator(keyEncoding, valueEncoding);
-    int v = it._init(ptr, limit, fillCache, gt, isGtClosed, lt, isLtClosed);
+    Uint8List ltEncoded;
+    if (lt != null) {
+      ltEncoded = keyEncoding._encode(lt);
+    }
+    Uint8List gtEncoded;
+    if (gt != null) {
+      gtEncoded = keyEncoding._encode(gt);
+    }
+    int v = it._init(ptr, limit, fillCache, gtEncoded, isGtClosed, ltEncoded, isLtClosed);
     LevelDBError e = LevelDB._getError(v);
     if (e != null) {
       throw e;
@@ -102,7 +110,7 @@ class LevelIterator extends NativeIterator {
     return it;
   }
 
-  int _init(int ptr, int limit, bool fillCache, String gt, bool isGtClosed, String lt, bool isLtClosed) native "Iterator_New";
+  int _init(int ptr, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "Iterator_New";
 
   void _getRows(int maxRows) {
     RawReceivePort port = new RawReceivePort();
@@ -293,7 +301,7 @@ class LevelDB extends NativeDB {
    *
    * FIXME: For now the parameters have to be dart strings.
    */
-  Stream<List> getItems({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
+  Stream<List> getItems({ Object gt, Object gte, Object lt, Object lte, int limit: -1, bool fillCache: true,
       LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
 
     LevelIterator iterator = LevelIterator._new(
@@ -314,11 +322,11 @@ class LevelDB extends NativeDB {
   /**
    * Some pretty API.
    */
-  Stream getKeys({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
+  Stream getKeys({ Object gt, Object gte, Object lt, Object lte, int limit: -1, bool fillCache: true,
     LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING}) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
           keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List item) => item[0]);
-  Stream getValues({ String gt, String gte, String lt, String lte, int limit: -1, bool fillCache: true,
+  Stream getValues({ Object gt, Object gte, Object lt, Object lte, int limit: -1, bool fillCache: true,
     LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING}) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
           keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List item) => item[1]);

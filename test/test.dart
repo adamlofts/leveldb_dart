@@ -65,6 +65,29 @@ void main() {
     keys = await db.getKeys(gte: "k1", lte: "k2").toList();
     expect(keys.length, equals(2));
 
+    // Test with LevelEncodingNone
+    Uint8List key = new Uint8List(2);
+    key[0] = "k".codeUnitAt(0);
+    key[1] = "1".codeUnitAt(0);
+    keys = await db.getKeys(gt: key, keyEncoding: const LevelEncodingNone()).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getKeys(gte: key, keyEncoding: const LevelEncodingNone()).toList();
+    expect(keys.length, equals(2));
+
+    key[1] = "2".codeUnitAt(0);
+    keys = await db.getKeys(gt: key, keyEncoding: const LevelEncodingNone()).toList();
+    expect(keys.length, equals(0));
+
+    keys = await db.getKeys(gte: key, keyEncoding: const LevelEncodingNone()).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getKeys(lt: key, keyEncoding: const LevelEncodingNone()).toList();
+    expect(keys.length, equals(1));
+
+    keys = await db.getValues(lt: key, keyEncoding: const LevelEncodingNone()).toList();
+    expect(keys.length, equals(1));
+
     await db.close();
   });
 
