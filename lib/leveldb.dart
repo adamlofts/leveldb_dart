@@ -135,14 +135,11 @@ class LevelIterator extends NativeIterator {
       return;
     }
 
-    if (isNoEncoding) {
-      _controller.add(result);
-    } else {
-      List ret = new List(2);
-      ret[0] = keyEncoding._decode(result[0]);
-      ret[1] = valueEncoding._decode(result[1]);
-      _controller.add(ret);
+    if (!isNoEncoding) {
+      result[0] = keyEncoding._decode(result[0]);
+      result[1] = valueEncoding._decode(result[1]);
     }
+    _controller.add(result);
   }
 }
 
