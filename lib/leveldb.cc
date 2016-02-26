@@ -642,7 +642,7 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCac
 //    memcpy(it_ref->gt, s, it_ref->gt_len);
   } else {
     Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg5);
-    assert(typed_data_type != Dart_TypedData_kInvalid);
+    assert(typed_data_type == Dart_TypedData_kUint8);
 
     char *data;
     intptr_t len;

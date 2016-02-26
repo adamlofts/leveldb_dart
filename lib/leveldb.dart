@@ -26,7 +26,7 @@ class LevelDBIOError extends LevelDBError {
 }
 
 abstract class LevelEncoding {
-  Uint8List _encode(var v);
+  Uint8List _encode(v);
   _decode(Uint8List v);
 }
 
@@ -46,7 +46,7 @@ class LevelEncodingAscii implements LevelEncoding {
 }
 
 /**
- * This encoding expects to be passed a Uint8List
+ * This encoding does no transformation. You must pass a Uint8List.
  */
 class LevelEncodingNone implements LevelEncoding {
   const LevelEncodingNone();
