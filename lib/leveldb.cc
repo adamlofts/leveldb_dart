@@ -540,6 +540,10 @@ void* IteratorWork(void *data) {
         it_ref->is_paused = true;
       }
       it_ref->mtx.unlock();
+
+      // Since the iterator has reached the end we can finalize it. This will release all memory the iterator has allocated.
+      iteratorFinalize(it_ref);
+
       break;
     }
 
@@ -678,7 +682,11 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCac
   Dart_GetNativeBooleanArgument(arguments, 5, &it_ref->is_gt_closed);
   Dart_GetNativeBooleanArgument(arguments, 7, &it_ref->is_lt_closed);
 
-  Dart_NewWeakPersistentHandle(arg0, (void*) it_ref, 0 /* external_allocation_size */, NativeIteratorFinalizer);
+  // We just pass the directly allocated size of the iterator here. The iterator holds a lot of other data in
+  // memory when it mmaps the files but I'm not sure how to account for it.
+  // Because the GC is not seeing all of the allocated memory it is important to manually call finalize() on the
+  // iterator when we are done with it (for example when the iterator reaches the end of its range).
+  Dart_NewWeakPersistentHandle(arg0, (void*) it_ref, /* external_allocation_size */ sizeof(IteratorRef), NativeIteratorFinalizer);
 
   // Add to iterators list
   db_ref->iterators->push_back(it_ref);
