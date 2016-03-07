@@ -118,12 +118,7 @@ static void iteratorPauseAndJoin(IteratorRef *it_ref) {
 static void emptyQueue(std::queue<RowRequest*> *queue, int32_t ret) {
   while (!queue->empty()) {
     RowRequest* request = queue->front();
-
-    Dart_CObject result;
-    result.type = Dart_CObject_kInt32;
-    result.value.as_int32 = ret;
-    Dart_PostCObject(request->reply_port_id, &result);
-
+    Dart_PostInteger(request->reply_port_id, ret);
     delete request;
     queue->pop();
   }
@@ -230,10 +225,7 @@ int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, D
 
     finalizeDB(db_ref);
 
-    Dart_CObject result;
-    result.type = Dart_CObject_kInt32;
-    result.value.as_int32 = 0;
-    Dart_PostCObject(reply_port_id, &result);
+    Dart_PostInteger(reply_port_id, 0);
     return 0;
   }
 
@@ -250,10 +242,7 @@ int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, D
       s = db->Get(leveldb::ReadOptions(), key, &value);
 
       if (s.IsNotFound()) {
-        Dart_CObject result;
-        result.type = Dart_CObject_kInt32;
-        result.value.as_int32 = 0;
-        Dart_PostCObject(reply_port_id, &result);
+        Dart_PostInteger(reply_port_id, 0);
         return 0;
       }
 
@@ -288,10 +277,7 @@ int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, D
       options.sync = param5->value.as_bool;
       s = db->Put(options, key, value);
 
-      Dart_CObject result;
-      result.type = Dart_CObject_kInt32;
-      result.value.as_int32 = 0;
-      Dart_PostCObject(reply_port_id, &result);
+      Dart_PostInteger(reply_port_id, 0);
       return 0;
     }
   }
@@ -306,10 +292,7 @@ int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, D
       leveldb::Status s;
       s = db->Delete(leveldb::WriteOptions(), key);
 
-      Dart_CObject result;
-      result.type = Dart_CObject_kInt32;
-      result.value.as_int32 = 0;
-      Dart_PostCObject(reply_port_id, &result);
+      Dart_PostInteger(reply_port_id, 0);
       return 0;
     }
   }
@@ -353,10 +336,7 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
       leveldb::Status status = leveldb::DB::Open(options, path, &new_db);
 
       if (status.IsIOError()) {
-        Dart_CObject result;
-        result.type = Dart_CObject_kInt32;
-        result.value.as_int32 = -2;
-        Dart_PostCObject(reply_port_id, &result);
+        Dart_PostInteger(reply_port_id, -2);
         return;
       }
       assert(status.ok());
@@ -366,12 +346,7 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
       db_ref->is_finalized = false;
       db_ref->db = new_db;
 
-      Dart_CObject result;
-      result.type = Dart_CObject_kInt64;
-      result.value.as_int64 = (int64_t) db_ref;
-      Dart_PostCObject(reply_port_id, &result);
-      //        // It is OK that result is destroyed when function exits.
-      //        // Dart_PostCObject has copied its data.
+      Dart_PostInteger(reply_port_id, (int64_t) db_ref);
       return;
     }
   }
@@ -394,10 +369,7 @@ void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
     }
   }
   if (error < 0) {
-    Dart_CObject result;
-    result.type = Dart_CObject_kInt32;
-    result.value.as_int32 = error;
-    Dart_PostCObject(reply_port_id, &result);
+    Dart_PostInteger(reply_port_id, error);
   }
 }
 
@@ -409,7 +381,7 @@ void dbServicePort(Dart_NativeArguments arguments) {
   Dart_EnterScope();
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_Port service_port =
-      Dart_NewNativePort("LevelService", levelServiceHandler, true /* handle concurrently */);
+      Dart_NewNativePort("LevelService", levelServiceHandler, false /* handle concurrently */);
   if (service_port != ILLEGAL_PORT) {
     Dart_Handle send_port = HandleError(Dart_NewSendPort(service_port));
     Dart_SetReturnValue(arguments, send_port);
@@ -467,10 +439,7 @@ void* IteratorWork(void *data) {
 
     // If we have emitted max_size rows then send the done message and destroy the pop the request from the queue.
     if (row_request != NULL && row_request->max_size == 0) {
-      Dart_CObject eos;
-      eos.type = Dart_CObject_kInt32;
-      eos.value.as_int32 = 1;
-      Dart_PostCObject(row_request->reply_port_id, &eos);
+      Dart_PostInteger(row_request->reply_port_id, 1);
 
       it_ref->mtx.lock();
       it_ref->request_queue->pop(); // Removes the 1st item.
@@ -718,10 +687,7 @@ void iteratorGetRows(Dart_NativeArguments arguments) {
     it_ref->request_queue->push(row_request);
   } else {
     // If we are finalized then respond that the db is closed
-    Dart_CObject result;
-    result.type = Dart_CObject_kInt32;
-    result.value.as_int32 = -1;
-    Dart_PostCObject(reply_port_id, &result);
+    Dart_PostInteger(reply_port_id, -1);
   }
   it_ref->mtx.unlock();
 
@@ -763,7 +729,6 @@ Dart_NativeFunction ResolveName(Dart_Handle name,
   if (auto_setup_scope == NULL) {
     return NULL;
   }
-
   Dart_EnterScope();
   const char* cname;
   HandleError(Dart_StringToCString(name, &cname));
