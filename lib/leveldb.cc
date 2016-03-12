@@ -48,34 +48,45 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
 }
 
 
-struct IteratorRef;
+struct NativeIterator;
 
 
-struct DBRef {
+struct Message {
+  int port_id;
+  int cmd;
+  char* path;
+
+  int key_len;
+  char* key;
+
+  int value_len;
+  char* value;
+
+  bool sync;
+  NativeIterator *iterator;
+};
+
+
+struct NativeDB {
   leveldb::DB *db;
 
-  std::mutex mtx;
-  std::list<IteratorRef*> *iterators;  // Guarded
-  bool is_finalized;  // Guarded
+  pthread_mutex_t mtx;
+  pthread_t thread;
+  pthread_cond_t cond;
+  std::list<Message*> *messages;
+
+  bool is_closed;
+  bool is_finalized;
+
+  std::list<NativeIterator*> *iterators;
 };
 
 
-struct RowRequest {
-  int64_t max_size;
-  Dart_Port reply_port_id;
-};
+struct NativeIterator {
+  NativeDB *native_db;
 
-
-struct IteratorRef {
-  DBRef *db_ref;
   leveldb::Iterator *iterator;
-
-  std::mutex mtx;
-  std::queue<RowRequest*> *request_queue; // Guarded
-
-  pthread_t thread; // Guarded
-  bool is_paused; // Guarded
-  bool is_finalized; // Guarded
+  bool is_finalized;
 
   // Iterator params
   int64_t limit;
@@ -85,96 +96,51 @@ struct IteratorRef {
   int64_t gt_len;
   uint8_t* lt;
   int64_t lt_len;
+  bool is_fill_cache;
 
   // Iterator state
-  bool is_seek_done;
   int64_t count;
 };
 
-/**
- * If the worker is running then ask it to stop and wait for it to do so.
- */
-static void iteratorPauseAndJoin(IteratorRef *it_ref) {
-  bool is_pausing = false;
-  pthread_t thread;
-  it_ref->mtx.lock();
-  if (!it_ref->is_paused) {
-    is_pausing = true;
-    it_ref->is_paused = true;
-    thread = it_ref->thread;
-    it_ref->thread = 0;
-  }
-  it_ref->mtx.unlock();
-
-  if (is_pausing) {
-    int rc = pthread_join(thread, NULL);
-  }
-}
-
 
 /**
- * Empty the request queue sending result to each port
+ * Finalize the iterator.
  */
-static void emptyQueue(std::queue<RowRequest*> *queue, int32_t ret) {
-  while (!queue->empty()) {
-    RowRequest* request = queue->front();
-    Dart_PostInteger(request->reply_port_id, ret);
-    delete request;
-    queue->pop();
+static void iteratorFinalize(NativeIterator *it_ref) {
+  if (it_ref->is_finalized) {
+    return; // FIXME: LOCKING?
   }
-}
-
-
-/**
- * Finalize the iterator. Joins up with the iterator thread and removes the iterator from the db list. Thread safe
- */
-static void iteratorFinalize(IteratorRef *it_ref) {
-  bool is_finalized = false;
-  it_ref->mtx.lock();
-  is_finalized = it_ref->is_finalized;
   it_ref->is_finalized = true;
-  it_ref->mtx.unlock();
 
-  if (is_finalized) {
-    return;
-  }
-
-  iteratorPauseAndJoin(it_ref);
+  // Remove the iterator from the db list
+  it_ref->native_db->iterators->remove(it_ref);
 
   delete it_ref->iterator;
   it_ref->iterator = NULL;
 
-  // Remove the iterator from the dbs list
-  it_ref->db_ref->iterators->remove(it_ref);
-
-  // Send an error to every socket in the request queue
-  emptyQueue(it_ref->request_queue, -1);
+  delete it_ref->gt;
+  delete it_ref->lt;
 }
+
 
 /**
  * Stop all iterators, close the db.
  * Thread safe.
  */
-static void finalizeDB(DBRef *db_ref) {
-  bool is_finalized;
-  db_ref->mtx.lock();
-  is_finalized = db_ref->is_finalized;
-  db_ref->is_finalized = true;
-  db_ref->mtx.unlock();
-
-  if (is_finalized) {
+static void finalizeDB(NativeDB *native_db) {
+  if (native_db->is_finalized) {  // FIXME: locking?
     return;
   }
+  native_db->is_finalized = true;
 
-  // Finalize every iterator. This will join with all iterator threads then the iterator will
-  // remove itself from the iterators array.
-  while (!db_ref->iterators->empty()) {
-    iteratorFinalize(db_ref->iterators->front());
+  // Finalize every iterator. The iterators remove themselves from the array.
+  while (!native_db->iterators->empty()) {
+    iteratorFinalize(native_db->iterators->front());
   }
-  delete db_ref->iterators;
+  delete native_db->iterators;
 
   // Close the db
-  delete db_ref->db;
+  delete native_db->db;
 }
 
 
@@ -182,10 +148,9 @@ static void finalizeDB(DBRef *db_ref) {
  * Finalizer called when the dart LevelDB instance is not reachable.
  * */
 static void NativeDBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
-  DBRef* db_ref = (DBRef*) peer;
-
-  // It is possible that db is still open if the user forgot to close()
-  finalizeDB(db_ref);
+  NativeDB* native_db = (NativeDB*) peer;
+  finalizeDB(native_db);
+  delete native_db;
 }
 
 
@@ -198,195 +163,12 @@ Dart_Handle HandleError(Dart_Handle handle) {
 
 
 /**
- * Finalizer called when the dart LevelDB instance is not reachable.
- *
+ * Finalizer called when the dart instance is not reachable.
  * */
 static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
-  IteratorRef* it_ref = (IteratorRef*) peer;
-
+  NativeIterator* it_ref = (NativeIterator*) peer;
   iteratorFinalize(it_ref);
-
-  // Thread is stopped. Free all memory.
-  assert(it_ref->iterator == NULL);
-  delete it_ref->gt;
-  delete it_ref->lt;
-
-  assert(it_ref->request_queue->empty());
-  delete it_ref->request_queue;
-
   delete it_ref;
-}
-
-
-int32_t levelDBServiceHandler(Dart_Port reply_port_id, DBRef *db_ref, int msg, Dart_CObject* message) {
-
-  if (msg == 2 &&
-      message->value.as_array.length == 3) { // close()
-
-    finalizeDB(db_ref);
-
-    Dart_PostInteger(reply_port_id, 0);
-    return 0;
-  }
-
-  leveldb::DB* db = db_ref->db;
-
-  if (msg == 3 &&
-      message->value.as_array.length == 4) { // get(key)
-    Dart_CObject* param3 = message->value.as_array.values[3];
-
-    if (param3->type == Dart_CObject_kTypedData) {
-      leveldb::Slice key = leveldb::Slice((const char*)param3->value.as_typed_data.values, param3->value.as_typed_data.length);
-      leveldb::Status s;
-      std:string value;
-      s = db->Get(leveldb::ReadOptions(), key, &value);
-
-      if (s.IsNotFound()) {
-        Dart_PostInteger(reply_port_id, 0);
-        return 0;
-      }
-
-      // FIXME: s.ok() <- raise exeception
-
-      Dart_CObject result;
-      result.type = Dart_CObject_kTypedData;
-      result.value.as_typed_data.type = Dart_TypedData_kUint8;
-      // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
-      result.value.as_typed_data.values = (uint8_t*) value.data();
-      result.value.as_typed_data.length = value.size();
-      Dart_PostCObject(reply_port_id, &result);
-      return 0;
-    }
-  }
-
-  if (msg == 4 &&
-      message->value.as_array.length == 6) { // put(key, value, sync)
-    Dart_CObject* param3 = message->value.as_array.values[3];
-    Dart_CObject* param4 = message->value.as_array.values[4];
-    Dart_CObject* param5 = message->value.as_array.values[5];
-
-    if (param3->type == Dart_CObject_kTypedData &&
-        param4->type == Dart_CObject_kTypedData &&
-        param5->type == Dart_CObject_kBool) {
-
-      leveldb::Slice key = leveldb::Slice((const char*)param3->value.as_typed_data.values, param3->value.as_typed_data.length);
-      leveldb::Slice value = leveldb::Slice((const char*)param4->value.as_typed_data.values, param4->value.as_typed_data.length);
-
-      leveldb::Status s;
-      leveldb::WriteOptions options;
-      options.sync = param5->value.as_bool;
-      s = db->Put(options, key, value);
-
-      Dart_PostInteger(reply_port_id, 0);
-      return 0;
-    }
-  }
-
-  if (msg == 5 &&
-          message->value.as_array.length == 4) { // delete(key)
-    Dart_CObject* param3 = message->value.as_array.values[3];
-
-    if (param3->type == Dart_CObject_kTypedData) {
-      leveldb::Slice key = leveldb::Slice((const char*)param3->value.as_typed_data.values, param3->value.as_typed_data.length);
-
-      leveldb::Status s;
-      s = db->Delete(leveldb::WriteOptions(), key);
-
-      Dart_PostInteger(reply_port_id, 0);
-      return 0;
-    }
-  }
-
-  return -2;
-}
-
-
-void levelServiceHandler(Dart_Port dest_port_id, Dart_CObject* message) {
-
-  // First arg should always be the reply port.
-  Dart_Port reply_port_id = ILLEGAL_PORT;
-  if (message->type == Dart_CObject_kArray &&
-    message->value.as_array.length > 0) {
-    Dart_CObject* param0 = message->value.as_array.values[0];
-    if (param0->type == Dart_CObject_kSendPort) {
-      reply_port_id = param0->value.as_send_port.id;
-    }
-  }
-
-  // Second arg is always message type
-  int msg = 0;
-  if (message->type == Dart_CObject_kArray &&
-      message->value.as_array.length > 1) {
-
-    Dart_CObject* param1 = message->value.as_array.values[1];
-    msg = param1->value.as_int32;
-  }
-
-  if (msg == 1) { // open(path)
-    Dart_CObject* param2 = message->value.as_array.values[2];
-
-    if (param2->type == Dart_CObject_kString) {
-      const char* path = param2->value.as_string;
-
-      leveldb::Options options;
-      options.create_if_missing = true;
-      options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
-
-      leveldb::DB* new_db;
-      leveldb::Status status = leveldb::DB::Open(options, path, &new_db);
-
-      if (status.IsIOError()) {
-        Dart_PostInteger(reply_port_id, -2);
-        return;
-      }
-      assert(status.ok());
-
-      DBRef* db_ref = new DBRef();
-      db_ref->iterators = new std::list<IteratorRef*>();
-      db_ref->is_finalized = false;
-      db_ref->db = new_db;
-
-      Dart_PostInteger(reply_port_id, (int64_t) db_ref);
-      return;
-    }
-  }
-
-  DBRef *db_ref = NULL;
-  if (msg > 1) {
-    // All messages below have param2 as the pointer.
-    Dart_CObject* param2 = message->value.as_array.values[2];
-    if (param2->type == Dart_CObject_kInt64) {
-      db_ref = (DBRef*) param2->value.as_int64;
-    }
-  }
-
-  int32_t error = 0;
-  if (db_ref != NULL) {
-    if (db_ref->is_finalized) {
-      error = -1;
-    } else {
-      error = levelDBServiceHandler(reply_port_id, db_ref, msg, message);
-    }
-  }
-  if (error < 0) {
-    Dart_PostInteger(reply_port_id, error);
-  }
-}
-
-
-/**
- Creates a port representing a level db thread
-*/
-void dbServicePort(Dart_NativeArguments arguments) {
-  Dart_EnterScope();
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_Port service_port =
-      Dart_NewNativePort("LevelService", levelServiceHandler, false /* handle concurrently */);
-  if (service_port != ILLEGAL_PORT) {
-    Dart_Handle send_port = HandleError(Dart_NewSendPort(service_port));
-    Dart_SetReturnValue(arguments, send_port);
-  }
-  Dart_ExitScope();
 }
 
 
@@ -407,212 +189,29 @@ void dbInit(Dart_NativeArguments arguments) {
 }
 
 
-void* IteratorWork(void *data) {
-  IteratorRef* it_ref = (IteratorRef*) data;
-  leveldb::Iterator* it = it_ref->iterator;
-
-  // The first time around we do an initial seek.
-  if (!it_ref->is_seek_done) {
-    it_ref->is_seek_done = true;
-    if (it_ref->gt_len > 0) {
-      leveldb::Slice start_slice = leveldb::Slice((char*)it_ref->gt, it_ref->gt_len);
-      it->Seek(start_slice);
-
-      if (!it_ref->is_gt_closed && it->Valid()) {
-        // If we are pointing at start_slice and not inclusive then we need to advance by 1
-        leveldb::Slice key = it->key();
-        if (key.compare(start_slice) == 0) {
-          it->Next();
-        }
-      }
-    } else {
-      it->SeekToFirst();
-    }
-  }
-
-  leveldb::Slice end_slice = leveldb::Slice((char*)it_ref->lt, it_ref->lt_len);
-
-  // When the thread leaves this loop it_ref->is_paused MUST be true and it_ref->thread MUST be 0 and the request queue must be
-  // empty. These changes are either made by this thread holding the lock or by another thread holding the lock.
-  RowRequest *row_request = NULL;
-  while (true) {
-
-    // If we have emitted max_size rows then send the done message and destroy the pop the request from the queue.
-    if (row_request != NULL && row_request->max_size == 0) {
-      Dart_PostInteger(row_request->reply_port_id, 1);
-
-      it_ref->mtx.lock();
-      it_ref->request_queue->pop(); // Removes the 1st item.
-      it_ref->mtx.unlock();
-
-      delete row_request;
-      row_request = NULL;
-    }
-
-    it_ref->mtx.lock();
-
-    // We have been paused by another thread. Leave the loop.
-    bool is_paused = it_ref->is_paused;
-
-    // Peek at the next row request if NULL. If there is no next request then send the empty signal and pause the thread.
-    if (row_request == NULL) {
-      if (it_ref->request_queue->empty()) {
-        is_paused = true;
-
-        it_ref->thread = 0;
-        it_ref->is_paused = true;
-
-
-      } else {
-        row_request = it_ref->request_queue->front();
-      }
-    }
-    it_ref->mtx.unlock();
-
-    if (is_paused) {
-      break;
-    }
-
-    bool is_valid = it->Valid();
-    bool is_limit_reached = it_ref->limit >= 0 && it_ref->count >= it_ref->limit;
-    bool is_query_limit_reached = false;
-    leveldb::Slice key;
-    leveldb::Slice value;
-
-    if (is_valid) {
-      key = it->key();
-      value = it->value();
-
-      // Check if key is equal to end slice
-      if (it_ref->lt_len > 0) {
-        int cmp = key.compare(end_slice);
-        if (cmp == 0 && !it_ref->is_lt_closed) {  // key == end_slice and not closed
-          is_query_limit_reached = true;
-        }
-        if (cmp > 0) { // key > end_slice
-          is_query_limit_reached = true;
-        }
-      }
-    }
-
-    // If the iterator has moved past the end or the limit reached  or the query parameters reached
-    // then send the finished message and shut down.
-    if (!is_valid || is_limit_reached || is_query_limit_reached) {
-
-      it_ref->mtx.lock();
-
-      // Send the close message to each request
-      emptyQueue(it_ref->request_queue, 0);
-
-      if (!it_ref->is_paused) {
-        it_ref->thread = 0;
-        it_ref->is_paused = true;
-      }
-      it_ref->mtx.unlock();
-
-      // Since the iterator has reached the end we can finalize it. This will release all memory the iterator has allocated.
-      iteratorFinalize(it_ref);
-
-      break;
-    }
-
-    Dart_CObject* values[2];
-
-    Dart_CObject r1;
-    r1.type = Dart_CObject_kTypedData;
-    r1.value.as_typed_data.type = Dart_TypedData_kUint8;
-    // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
-    r1.value.as_typed_data.values = (uint8_t*) key.data();
-    r1.value.as_typed_data.length = key.size();
-    values[0] = &r1;
-
-    Dart_CObject r2;
-    r2.type = Dart_CObject_kTypedData;
-    r2.value.as_typed_data.type = Dart_TypedData_kUint8;
-    // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
-    r2.value.as_typed_data.values = (uint8_t*) value.data();
-    r2.value.as_typed_data.length = value.size();
-    values[1] = &r2;
-
-    Dart_CObject result;
-    result.type = Dart_CObject_kArray;
-    result.value.as_array.length = 2;
-    result.value.as_array.values = values;
-
-    // It is OK that result is destroyed when function exits.
-    // Dart_PostCObject has copied its data.
-    Dart_PostCObject(row_request->reply_port_id, &result);
-    row_request->max_size -= 1;
-
-    it_ref->count += 1;
-    it->Next();
-  }
-}
-
-
-/**
- * Starts the worker thread up (if it has not already started)
- */
-static void iteratorStartWork(IteratorRef *it_ref) {
-  it_ref->mtx.lock();
-  if (it_ref->is_paused && !it_ref->is_finalized) {
-    it_ref->is_paused = false;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-    int rc = pthread_create(&it_ref->thread, &attr, IteratorWork, (void*)it_ref);
-    assert(rc == 0);
-
-    pthread_attr_destroy(&attr);
-  }
-  it_ref->mtx.unlock();
-}
-
-
 void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed)
   Dart_EnterScope();
 
+  NativeDB *native_db;
   Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
-  int64_t value;
-  Dart_GetNativeIntegerArgument(arguments, 1, &value);
-  DBRef* db_ref = (DBRef *) value;
+  Dart_GetNativeInstanceField(arg1, 0, (intptr_t*) &native_db);
 
-  db_ref->mtx.lock();
-  if (db_ref->is_finalized) {
-    Dart_SetReturnValue(arguments, Dart_NewInteger(-1));
-    Dart_ExitScope();
-    db_ref->mtx.unlock();
-    return;
-  }
-
-  IteratorRef* it_ref = new IteratorRef();
-  it_ref->db_ref = db_ref;
-  it_ref->is_paused = true;
-  it_ref->thread = 0;
-  it_ref->is_seek_done = false;
-  it_ref->count = 0;
+  NativeIterator* it_ref = new NativeIterator();
+  it_ref->native_db = native_db;
   it_ref->is_finalized = false;
-  it_ref->request_queue = new std::queue<RowRequest*>();
-
-  leveldb::ReadOptions options;
-  Dart_GetNativeBooleanArgument(arguments, 3, &options.fill_cache);
-  it_ref->iterator = db_ref->db->NewIterator(options);
+  it_ref->iterator = NULL;
+  it_ref->count = 0;
 
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
   Dart_SetNativeInstanceField(arg0, 0, (intptr_t) it_ref);
 
   Dart_GetNativeIntegerArgument(arguments, 2, &it_ref->limit);
+  Dart_GetNativeBooleanArgument(arguments, 3, &it_ref->is_fill_cache);
 
   Dart_Handle arg5 = Dart_GetNativeArgument(arguments, 4);
   if (Dart_IsNull(arg5)) {
     it_ref->gt = NULL;
     it_ref->gt_len = 0;
-//  } else if (Dart_IsString(arg5)) {
-//    uint8_t* s;
-//    Dart_StringToUTF8(arg5, &s, &it_ref->gt_len);
-//    it_ref->gt = (uint8_t*) malloc(it_ref->gt_len);
-//    memcpy(it_ref->gt, s, it_ref->gt_len);
   } else {
     Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg5);
     assert(typed_data_type == Dart_TypedData_kUint8);
@@ -630,11 +229,6 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCac
   if (Dart_IsNull(arg6)) {
     it_ref->lt = NULL;
     it_ref->lt_len = 0;
-//  } else if (Dart_IsString(arg7)) {
-//    uint8_t* s;
-//    Dart_StringToUTF8(arg7, &s, &it_ref->lt_len);
-//    it_ref->lt = (uint8_t*) malloc(it_ref->lt_len);
-//    memcpy(it_ref->lt, s, it_ref->lt_len);
   } else {
     Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg6);
     assert(typed_data_type != Dart_TypedData_kInvalid);
@@ -655,43 +249,496 @@ void iteratorNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCac
   // memory when it mmaps the files but I'm not sure how to account for it.
   // Because the GC is not seeing all of the allocated memory it is important to manually call finalize() on the
   // iterator when we are done with it (for example when the iterator reaches the end of its range).
-  Dart_NewWeakPersistentHandle(arg0, (void*) it_ref, /* external_allocation_size */ sizeof(IteratorRef), NativeIteratorFinalizer);
-
-  // Add to iterators list
-  db_ref->iterators->push_back(it_ref);
-
-  db_ref->mtx.unlock();
+  Dart_NewWeakPersistentHandle(arg0, (void*) it_ref, /* external_allocation_size */ sizeof(NativeIterator), NativeIteratorFinalizer);
 
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_ExitScope();
 }
 
 
-void iteratorGetRows(Dart_NativeArguments arguments) {
+const int MESSAGE_OPEN = 0;
+const int MESSAGE_PUT = 1;
+const int MESSAGE_GET = 2;
+const int MESSAGE_DELETE = 3;
+const int MESSAGE_GET_ROWS = 4;
+const int MESSAGE_CLOSE = 5;
+
+
+void freeMessage(Message*m) {
+  delete m->path;
+  delete m->key;
+  delete m->value;
+
+  delete m;
+}
+
+
+void processMessageOpen(NativeDB *native_db, Message *m) {
+  leveldb::Options options;
+  options.create_if_missing = true;
+  options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
+
+  leveldb::DB* new_db;
+  leveldb::Status status = leveldb::DB::Open(options, m->path, &native_db->db);
+
+  if (status.IsIOError()) {
+    Dart_PostInteger(m->port_id, -2);
+    return;
+  }
+  assert(status.ok());
+  Dart_PostInteger(m->port_id, 0);
+}
+
+
+void processMessagePut(NativeDB *native_db, Message *m) {
+  leveldb::Status s;
+  leveldb::WriteOptions options;
+  options.sync = m->sync;
+
+  leveldb::Slice key = leveldb::Slice(m->key, m->key_len);
+  leveldb::Slice value = leveldb::Slice(m->value, m->value_len);
+  s = native_db->db->Put(options, key, value);
+  Dart_PostInteger(m->port_id, 0);
+}
+
+
+void processMessageGet(NativeDB *native_db, Message *m) {
+  leveldb::Slice key = leveldb::Slice(m->key, m->key_len);
+  leveldb::Status s;
+  std:string value;
+  s = native_db->db->Get(leveldb::ReadOptions(), key, &value);
+
+  if (s.IsNotFound()) {
+    Dart_PostInteger(m->port_id, 0);
+    return;
+  }
+
+  assert(s.ok());
+
+  Dart_CObject result;
+  result.type = Dart_CObject_kTypedData;
+  result.value.as_typed_data.type = Dart_TypedData_kUint8;
+  // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
+  result.value.as_typed_data.values = (uint8_t*) value.data();
+  result.value.as_typed_data.length = value.size();
+  Dart_PostCObject(m->port_id, &result);
+}
+
+
+void processMessageDelete(NativeDB *native_db, Message *m) {
+  leveldb::Slice key = leveldb::Slice(m->key, m->key_len);
+  leveldb::Status s;
+  s = native_db->db->Delete(leveldb::WriteOptions(), key);
+  assert(s.ok());
+  Dart_PostInteger(m->port_id, 0);
+}
+
+
+void processMessageGetRows(NativeDB *native_db, Message *m) {
+  NativeIterator *native_iterator = m->iterator;
+
+  leveldb::Iterator* it = native_iterator->iterator;
+
+  // If it is NULL we need to create the iterator and perform the initial seek.
+  if (it == NULL) {
+    leveldb::ReadOptions options;
+    options.fill_cache = native_iterator->is_fill_cache;
+    it = native_db->db->NewIterator(options);
+
+    native_iterator->iterator = it;
+    // Add the iterator to the db list. This is so we know to finalize it before finalizing the db.
+    native_db->iterators->push_back(native_iterator);
+
+    if (native_iterator->gt_len > 0) {
+      leveldb::Slice start_slice = leveldb::Slice((char*)native_iterator->gt, native_iterator->gt_len);
+      it->Seek(start_slice);
+
+      if (!native_iterator->is_gt_closed && it->Valid()) {
+        // If we are pointing at start_slice and not inclusive then we need to advance by 1
+        leveldb::Slice key = it->key();
+        if (key.compare(start_slice) == 0) {
+          it->Next();
+        }
+      }
+    } else {
+      it->SeekToFirst();
+    }
+  }
+
+  leveldb::Slice end_slice = leveldb::Slice((char*)native_iterator->lt, native_iterator->lt_len);
+
+  while (!native_iterator->is_finalized) {
+    bool is_valid = it->Valid();
+    bool is_limit_reached = native_iterator->limit >= 0 && native_iterator->count >= native_iterator->limit;
+    bool is_query_limit_reached = false;
+    leveldb::Slice key;
+    leveldb::Slice value;
+
+      if (is_valid) {
+        key = it->key();
+        value = it->value();
+
+        // Check if key is equal to end slice
+        if (native_iterator->lt_len > 0) {
+          int cmp = key.compare(end_slice);
+          if (cmp == 0 && !native_iterator->is_lt_closed) {  // key == end_slice and not closed
+            is_query_limit_reached = true;
+          }
+          if (cmp > 0) { // key > end_slice
+            is_query_limit_reached = true;
+          }
+        }
+      }
+
+      if (!is_valid || is_query_limit_reached || is_limit_reached) {
+        // The iterator has reached the end of its rows. We can finalize it now.
+        iteratorFinalize(native_iterator);
+        break;
+      }
+
+      Dart_CObject* values[2];
+
+      Dart_CObject r1;
+      r1.type = Dart_CObject_kTypedData;
+      r1.value.as_typed_data.type = Dart_TypedData_kUint8;
+      // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
+      r1.value.as_typed_data.values = (uint8_t*) key.data();
+      r1.value.as_typed_data.length = key.size();
+      values[0] = &r1;
+
+      Dart_CObject r2;
+      r2.type = Dart_CObject_kTypedData;
+      r2.value.as_typed_data.type = Dart_TypedData_kUint8;
+      // It is OK not to copy the slice data because Dart_PostCObject has copied its data.
+      r2.value.as_typed_data.values = (uint8_t*) value.data();
+      r2.value.as_typed_data.length = value.size();
+      values[1] = &r2;
+
+      Dart_CObject result;
+      result.type = Dart_CObject_kArray;
+      result.value.as_array.length = 2;
+      result.value.as_array.values = values;
+
+      // It is OK that result is destroyed when function exits.
+      // Dart_PostCObject has copied its data.
+      Dart_PostCObject(m->port_id, &result);
+
+      native_iterator->count += 1;
+      it->Next();
+  }
+  Dart_PostInteger(m->port_id, 0);
+}
+
+
+void processMessage(NativeDB *native_db, Message *m) {
+  switch (m->cmd) {
+    case MESSAGE_OPEN:
+      processMessageOpen(native_db, m);
+      break;
+    case MESSAGE_PUT:
+      processMessagePut(native_db, m);
+      break;
+    case MESSAGE_GET:
+      processMessageGet(native_db, m);
+      break;
+    case MESSAGE_DELETE:
+      processMessageDelete(native_db, m);
+      break;
+    case MESSAGE_GET_ROWS:
+      processMessageGetRows(native_db, m);
+      break;
+    default:
+      assert(false);
+  }
+}
+
+
+void* processMessages(void* ptr) {
+  NativeDB *native_db = (NativeDB*) ptr;
+  Message* m;
+
+  while (true) {
+    pthread_mutex_lock(&native_db->mtx);
+    while (native_db->messages->empty()) {
+      pthread_cond_wait(&native_db->cond, &native_db->mtx);
+    }
+    m = native_db->messages->front();
+    native_db->messages->pop_front();
+    pthread_mutex_unlock(&native_db->mtx);
+
+    if (m->cmd == MESSAGE_CLOSE) {
+      break;
+    }
+    processMessage(native_db, m);
+    freeMessage(m);
+  }
+
+  // Finalize. This will finalize all iterators and then the db.
+  finalizeDB(native_db);
+
+  // Respond to the close message
+  Dart_PostInteger(m->port_id, 0);
+  freeMessage(m);
+}
+
+
+void dbAddMessage(NativeDB* native_db, Message *m) {
+  pthread_mutex_lock(&native_db->mtx);
+  native_db->messages->push_back(m);
+  pthread_cond_signal(&native_db->cond);
+  pthread_mutex_unlock(&native_db->mtx);
+}
+
+
+void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path)
   Dart_EnterScope();
 
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  IteratorRef* it_ref;
-  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &it_ref);
 
-  Dart_Port reply_port_id;
-  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 1);
-  Dart_SendPortGetId(arg2, &reply_port_id);
+  Dart_Port port_id;
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  Dart_SendPortGetId(arg1, &port_id);
 
-  it_ref->mtx.lock();
-  if (!it_ref->is_finalized) {
-    RowRequest *row_request = new RowRequest();
-    row_request->reply_port_id = reply_port_id;
-    Dart_GetNativeIntegerArgument(arguments, 2, &row_request->max_size);
+  const char* path;
+  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
+  Dart_StringToCString(arg2, &path);
 
-    it_ref->request_queue->push(row_request);
-  } else {
-    // If we are finalized then respond that the db is closed
-    Dart_PostInteger(reply_port_id, -1);
+  // Allocate the db
+  NativeDB* native_db = new NativeDB();
+  native_db->is_closed = false;
+  native_db->is_finalized = false;
+  native_db->messages = new std::list<Message*>();
+  native_db->iterators = new std::list<NativeIterator*>();
+
+  Dart_SetNativeInstanceField(arg0, 0, (intptr_t) native_db);
+
+  // Create the open message
+  Message* m = new Message();
+  m->port_id = port_id;
+  m->path = strdup(path);
+  m->key = NULL;
+  m->value = NULL;
+  dbAddMessage(native_db, m);
+
+  // Start the db thread
+  pthread_mutex_init(&native_db->mtx, NULL);
+  pthread_cond_init(&native_db->cond, NULL);
+
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+  int rc = pthread_create(&native_db->thread, &attr, processMessages, (void*)native_db);
+  assert(rc == 0);
+
+  pthread_attr_destroy(&attr);
+
+  Dart_NewWeakPersistentHandle(arg0, (void*) native_db, sizeof(NativeDB) /* external_allocation_size */, NativeDBFinalizer);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+void dbPut(Dart_NativeArguments arguments) {  // (SendPort port, Uint8List key, Uint8List value, bool sync)
+  Dart_EnterScope();
+
+  NativeDB *native_db;
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
+
+  Dart_Port port_id;
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  Dart_SendPortGetId(arg1, &port_id);
+
+  if (native_db->is_closed) {
+    Dart_PostInteger(port_id, -1);
+    Dart_SetReturnValue(arguments, Dart_Null());
+    Dart_ExitScope();
+    return;
   }
-  it_ref->mtx.unlock();
 
-  iteratorStartWork(it_ref);
+  // Create the open message
+  Message* m = new Message();
+  m->port_id = port_id;
+  m->cmd = MESSAGE_PUT;
+  m->path = NULL;
+
+  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
+  Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg2);
+  assert(typed_data_type == Dart_TypedData_kUint8);
+  char *data;
+  intptr_t len;
+  Dart_TypedDataAcquireData(arg2, &typed_data_type, (void**)&data, &len);
+  m->key_len = len;
+  m->key = (char*) malloc(len);
+  memcpy(m->key, data, len);
+  Dart_TypedDataReleaseData(arg2);
+
+  Dart_Handle arg3 = Dart_GetNativeArgument(arguments, 3);
+  typed_data_type = Dart_GetTypeOfTypedData(arg2);
+  assert(typed_data_type == Dart_TypedData_kUint8);
+  Dart_TypedDataAcquireData(arg3, &typed_data_type, (void**)&data, &len);
+  m->value_len = len;
+  m->value = (char*) malloc(len);
+  memcpy(m->value, data, len);
+  Dart_TypedDataReleaseData(arg3);
+
+  Dart_GetNativeBooleanArgument(arguments, 4, &m->sync);
+  dbAddMessage(native_db, m);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+void dbGet(Dart_NativeArguments arguments) {  // (SendPort port, Uint8List key)
+  Dart_EnterScope();
+
+  NativeDB *native_db;
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
+
+  Dart_Port port_id;
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  Dart_SendPortGetId(arg1, &port_id);
+
+  if (native_db->is_closed) {
+    Dart_PostInteger(port_id, -1);
+    Dart_SetReturnValue(arguments, Dart_Null());
+    Dart_ExitScope();
+    return;
+  }
+
+  // Create the open message
+  Message* m = new Message();
+  m->port_id = port_id;
+  m->cmd = MESSAGE_GET;
+  m->path = NULL;
+
+  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
+  Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg2);
+  assert(typed_data_type == Dart_TypedData_kUint8);
+  char *data;
+  intptr_t len;
+  Dart_TypedDataAcquireData(arg2, &typed_data_type, (void**)&data, &len);
+  m->key_len = len;
+  m->key = (char*) malloc(len);
+  memcpy(m->key, data, len);
+  Dart_TypedDataReleaseData(arg2);
+
+  m->value = NULL;
+  dbAddMessage(native_db, m);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+void dbDelete(Dart_NativeArguments arguments) {  // (SendPort port, Uint8List key)
+  Dart_EnterScope();
+
+  NativeDB *native_db;
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
+
+  Dart_Port port_id;
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  Dart_SendPortGetId(arg1, &port_id);
+
+  if (native_db->is_closed) {
+    Dart_PostInteger(port_id, -1);
+    Dart_SetReturnValue(arguments, Dart_Null());
+    Dart_ExitScope();
+    return;
+  }
+
+  // Create the open message
+  Message* m = new Message();
+  m->port_id = port_id;
+  m->cmd = MESSAGE_DELETE;
+  m->path = NULL;
+
+  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
+  Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg2);
+  assert(typed_data_type == Dart_TypedData_kUint8);
+  char *data;
+  intptr_t len;
+  Dart_TypedDataAcquireData(arg2, &typed_data_type, (void**)&data, &len);
+  m->key_len = len;
+  m->key = (char*) malloc(len);
+  memcpy(m->key, data, len);
+  Dart_TypedDataReleaseData(arg2);
+
+  m->value = NULL;
+  dbAddMessage(native_db, m);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+void dbGetRows(Dart_NativeArguments arguments) {  // (SendPort port, Leveliterator iterator)
+  Dart_EnterScope();
+
+  NativeDB *native_db;
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
+
+  Dart_Port port_id;
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  Dart_SendPortGetId(arg1, &port_id);
+
+  if (native_db->is_closed) {
+    Dart_PostInteger(port_id, -1);
+    Dart_SetReturnValue(arguments, Dart_Null());
+    Dart_ExitScope();
+    return;
+  }
+
+  NativeIterator *native_iterator;
+  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
+  Dart_GetNativeInstanceField(arg2, 0, (intptr_t*) &native_iterator);
+
+  Message* m = new Message();
+  m->port_id = port_id;
+  m->cmd = MESSAGE_GET_ROWS;
+  m->path = NULL;
+  m->key = NULL;
+  m->value = NULL;
+  m->iterator = native_iterator;
+  dbAddMessage(native_db, m);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+void dbClose(Dart_NativeArguments arguments) {  // (SendPort port)
+  Dart_EnterScope();
+
+  NativeDB *native_db;
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
+
+  Dart_Port port_id;
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  Dart_SendPortGetId(arg1, &port_id);
+
+  if (native_db->is_closed) {
+    Dart_PostInteger(port_id, -1);
+    Dart_SetReturnValue(arguments, Dart_Null());
+    Dart_ExitScope();
+    return;
+  }
+
+  native_db->is_closed = true;
+
+  // Send the close message to the thread and join.
+  Message* m = new Message();
+  m->port_id = port_id;
+  m->cmd = MESSAGE_CLOSE;
+  dbAddMessage(native_db, m);
 
   Dart_SetReturnValue(arguments, Dart_Null());
   Dart_ExitScope();
@@ -705,11 +752,14 @@ struct FunctionLookup {
 
 
 FunctionLookup function_list[] = {
-    {"DB_Init", dbInit},
-    {"DB_ServicePort", dbServicePort},
+    {"DB_Open", dbOpen},
+    {"DB_Put", dbPut},
+    {"DB_Get", dbGet},
+    {"DB_Delete", dbDelete},
+    {"DB_GetRows", dbGetRows},
+    {"DB_Close", dbClose},
 
     {"Iterator_New", iteratorNew},
-    {"Iterator_GetRows", iteratorGetRows},
 
     {NULL, NULL}};
 

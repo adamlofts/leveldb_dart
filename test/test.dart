@@ -91,6 +91,21 @@ void main() {
     await db.close();
   });
 
+  test('LevelDB delete', () async {
+    LevelDB db = await openTestDB();
+    try {
+      await db.put("k1", "v");
+      await db.put("k2", "v");
+
+      await db.delete("k1");
+
+      expect(await db.get("k1"), equals(null));
+      expect((await db.getItems().toList()).length, 1);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('TWO DBS', () async {
     LevelDB db1 = await openTestDB();
     LevelDB db2 = await openTestDB(index: 1);
@@ -187,4 +202,5 @@ void main() {
 
     expect(isClosedSeen, equals(true));
   });
+
 }
