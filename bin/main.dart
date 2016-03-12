@@ -3,7 +3,8 @@ import 'dart:async';
 
 import 'package:leveldb/leveldb.dart';
 
-Future main() async {
+/// main example.
+Future<dynamic> main() async {
 
   // Open a database. It is created if it does not already exist. Only one process can
   // open a database at a time.
@@ -26,17 +27,17 @@ Future main() async {
   print("value3 is $value3"); // value3 is null
 
   // Now lets add a few key-value pairs
-  for (int i in new Iterable.generate(5)) {
+  for (int i in new Iterable<int>.generate(5)) {
     await db.put("key-$i", "value-$i");
   }
 
   // Iterate through the key-value pairs in key order.
-  await for (var v in db.getItems()) {
+  await for (List<String> v in db.getItems()) {
     print("Row: ${v[0]} ${v[1]}");  // prints Row: key-0 value-0, Row: key-1 value-1, ...
   }
 
   // Iterate keys between key-1 and key-3
-  await for (var v in db.getItems(gte: "key-1", lte: "key-3")) {
+  await for (List<String> v in db.getItems(gte: "key-1", lte: "key-3")) {
     print("Row: ${v[0]} ${v[1]}");  // prints Row: key-1 value-1, Row: key-2 value-2, Row: key-3 value-3
   }
 

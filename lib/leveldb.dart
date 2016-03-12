@@ -11,99 +11,138 @@ import 'dart:convert';
 
 import 'dart-ext:leveldb';
 
+/// Base class for all exceptions thrown by leveldb_dart.
 abstract class LevelDBError implements Exception {
-  final String msg;
-  const LevelDBError(this.msg);
-  String toString() => 'LevelDBError: $msg';
+  final String _msg;
+  const LevelDBError._internal(this._msg);
+  @override
+  String toString() => 'LevelDBError: $_msg';
 }
 
+/// Exception thrown if the database is used after it has been closed.
 class LevelDBClosedError extends LevelDBError {
-  const LevelDBClosedError() : super("DB already closed");
+  const LevelDBClosedError._internal() : super._internal("DB already closed");
 }
 
+/// Exception thrown if a general IO error is encountered.
 class LevelDBIOError extends LevelDBError {
-  const LevelDBIOError() : super("IOError");
+  const LevelDBIOError._internal() : super._internal("IOError");
 }
 
+/// Interface for specifying an encoding. The encoding must encode the object ot a Uint8List and decode
+/// from a Uint8List.
 abstract class LevelEncoding {
-  Uint8List _encode(v);
-  _decode(Uint8List v);
+  /// Encode to a Uint8List
+  Uint8List encode(dynamic v);
+  /// Decode from a Uint8List
+  dynamic decode(Uint8List v);
+
+  /// The none encoding does not encoding. You must pass in a Uint8List to all fucntions.
+  /// Because it does no transformation it reduces the number of allocations.
+  /// Use this encoding for performance.
+  static LevelEncoding get none => const _LevelEncodingNone();
+
+  /// Default encoding. Expects to be passed a String and will encode/decode to UTF8 in the db.
+  static LevelEncoding get utf8 => const _LevelEncodingUtf8();
+
+  /// Ascii encoding. Potentially faster than UTF8 (untested).
+  static LevelEncoding get ascii => const _LevelEncodingAscii();
+
+  static dynamic _encodeValue(dynamic v, LevelEncoding encoding) {
+    if (encoding == const _LevelEncodingNone()) {
+      return v;
+    }
+    if (encoding == null) { // Default to utf8
+      return const _LevelEncodingUtf8().encode(v);
+    }
+    return encoding.encode(v);
+  }
+
+  static dynamic _decodeValue(dynamic v, LevelEncoding encoding) {
+    if (encoding == const _LevelEncodingNone()) {
+      return v;
+    }
+    if (encoding == null) { // Default to utf8
+      return const _LevelEncodingUtf8().decode(v);
+    }
+    return encoding.decode(v);
+  }
 }
 
-/**
- * This encoding expects a string.
- */
-class LevelEncodingUtf8 implements LevelEncoding {
-  const LevelEncodingUtf8();
-  Uint8List _encode(String v) => new Uint8List.fromList(UTF8.encode(v));
-  String _decode(Uint8List v) => UTF8.decode(v);
+class _LevelEncodingUtf8 implements LevelEncoding {
+  /// Default UTF8 encoding.
+  const _LevelEncodingUtf8();
+  @override
+  Uint8List encode(String v) => new Uint8List.fromList(UTF8.encode(v));
+  @override
+  String decode(Uint8List v) => UTF8.decode(v);
 }
 
-class LevelEncodingAscii implements LevelEncoding {
-  const LevelEncodingAscii();
-  Uint8List _encode(String v) => new Uint8List.fromList(const AsciiCodec().encode(v));
-  String _decode(Uint8List v) => const AsciiCodec().decode(v);
+class _LevelEncodingAscii implements LevelEncoding {
+  // Ascii encoding
+  const _LevelEncodingAscii();
+  @override
+  Uint8List encode(String v) => new Uint8List.fromList(const AsciiCodec().encode(v));
+  @override
+  String decode(Uint8List v) => const AsciiCodec().decode(v);
 }
 
-/**
- * This encoding does no transformation. You must pass a Uint8List.
- */
-class LevelEncodingNone implements LevelEncoding {
-  const LevelEncodingNone();
-  Uint8List _encode(Uint8List v) => v;
-  Uint8List _decode(Uint8List v) => v;
+class _LevelEncodingNone implements LevelEncoding {
+  const _LevelEncodingNone();
+  @override
+  Uint8List encode(Uint8List v) => throw new AssertionError();  // Never called
+  @override
+  Uint8List decode(Uint8List v) => throw new AssertionError();  // Never called
 }
 
-class LevelIterator extends NativeIterator {
-
-  static const int MAX_ROWS = 15000;
+class _LevelIterator extends NativeIterator {
 
   final LevelDB _db;
 
-  final LevelEncoding keyEncoding;
-  final LevelEncoding valueEncoding;
-  final bool isNoEncoding;
+  final LevelEncoding _keyEncoding;
+  final LevelEncoding _valueEncoding;
+  final bool _isNoEncoding;
 
-  StreamController<List> _controller;
+  StreamController<List<dynamic>> _controller;
 
-  bool isStreaming;
+  bool _isStreaming;
 
-  LevelIterator(LevelDB db, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
+  _LevelIterator._internal(LevelDB db, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
        _db = db,
-        keyEncoding = keyEncoding,
-        valueEncoding = valueEncoding,
-        isNoEncoding = keyEncoding == LevelEncodingNone &&  valueEncoding == LevelEncodingNone {
+        _keyEncoding = keyEncoding,
+        _valueEncoding = valueEncoding,
+        _isNoEncoding = keyEncoding == const _LevelEncodingNone() && valueEncoding == const _LevelEncodingNone() {
 
-    _controller = new StreamController<List>(
+    _controller = new StreamController<List<dynamic>>(
         onListen: () {
-          isStreaming = true;
-          _getRows(MAX_ROWS);
+          _isStreaming = true;
+          _getRows();
         },
         onPause: () {
-          isStreaming = false;
+          _isStreaming = false;
         },
         onResume: () {
-          isStreaming = true;
-          _getRows(MAX_ROWS);
+          _isStreaming = true;
+          _getRows();
         },
         onCancel: () {
-          isStreaming = false;
+          _isStreaming = false;
         },
         sync: true
     );
   }
 
-  Stream<List> get stream => _controller.stream;
+  Stream<List<dynamic>> get stream => _controller.stream;
 
-  static LevelIterator _new(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) {
-    LevelIterator it = new LevelIterator(db, keyEncoding, valueEncoding);
+  static _LevelIterator _new(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) {
+    _LevelIterator it = new _LevelIterator._internal(db, keyEncoding, valueEncoding);
     Uint8List ltEncoded;
     if (lt != null) {
-      ltEncoded = keyEncoding._encode(lt);
+      ltEncoded = LevelEncoding._encodeValue(lt, keyEncoding);
     }
     Uint8List gtEncoded;
     if (gt != null) {
-      gtEncoded = keyEncoding._encode(gt);
+      gtEncoded = LevelEncoding._encodeValue(gt, keyEncoding);
     }
     int v = it._init(db, limit, fillCache, gtEncoded, isGtClosed, ltEncoded, isLtClosed);
     LevelDBError e = LevelDB._getError(v);
@@ -115,13 +154,13 @@ class LevelIterator extends NativeIterator {
 
   int _init(LevelDB db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "Iterator_New";
 
-  void _getRows(int maxRows) {
+  void _getRows() {
     RawReceivePort port = new RawReceivePort();
-    port.handler = (result) => _handler(port, result);
+    port.handler = (dynamic result) => _handler(port, result);
     _db._getRows(port.sendPort, this);
   }
 
-  void _handler(RawReceivePort port, result) {
+  void _handler(RawReceivePort port, dynamic result) {
     LevelDBError e = LevelDB._getError(result);
     if (e != null) {
       port.close();
@@ -138,47 +177,43 @@ class LevelIterator extends NativeIterator {
 
     if (result == 1) { // maxRows reached
       port.close();
-      if (isStreaming) {
-        _getRows(MAX_ROWS); // Get some more rows.
+      if (_isStreaming) {
+        _getRows(); // Get some more rows.
       }
       return;
     }
 
-    if (!isNoEncoding) {
-      result[0] = keyEncoding._decode(result[0]);
-      result[1] = valueEncoding._decode(result[1]);
+    if (!_isNoEncoding) {
+      result[0] = LevelEncoding._decodeValue(result[0], _keyEncoding);
+      result[1] = LevelEncoding._decodeValue(result[1], _valueEncoding);
     }
     _controller.add(result);
   }
 }
 
-const _ENCODING = const LevelEncodingUtf8();
-
+/// A key-value database
 class LevelDB extends NativeDB {
+
+  LevelDB._internal();
 
   void _open(SendPort port, String path) native "DB_Open";
   void _put(SendPort port, Uint8List key, Uint8List value, bool sync) native "DB_Put";
   void _get(SendPort port, Uint8List key) native "DB_Get";
   void _delete(SendPort port, Uint8List key) native "DB_Delete";
-  void _getRows(SendPort port, LevelIterator it) native "DB_GetRows";
+  void _getRows(SendPort port, _LevelIterator it) native "DB_GetRows";
   void _close(SendPort port) native "DB_Close";
 
-  /**
-   * Internal constructor. Use LevelDB::open().
-   */
-  LevelDB();
-
-  static LevelDBError _getError(var reply) {
+  static LevelDBError _getError(dynamic reply) {
     if (reply == -1) {
-      return const LevelDBClosedError();
+      return const LevelDBClosedError._internal();
     }
     if (reply == -2) {
-      return const LevelDBIOError();
+      return const LevelDBIOError._internal();
     }
     return null;
   }
 
-  static bool _completeError(Completer completer, var reply) {
+  static bool _completeError(Completer<dynamic> completer, dynamic reply) {
     LevelDBError e = _getError(reply);
     if (e != null) {
       completer.completeError(e);
@@ -187,12 +222,13 @@ class LevelDB extends NativeDB {
     return false;
   }
 
+  /// Open a new database at `path`
   static Future<LevelDB> open(String path) {
-    var completer = new Completer();
-    var replyPort = new RawReceivePort();
+    Completer<LevelDB> completer = new Completer<LevelDB>();
+    RawReceivePort replyPort = new RawReceivePort();
 
-    LevelDB db = new LevelDB();
-    replyPort.handler = (var result) {
+    LevelDB db = new LevelDB._internal();
+    replyPort.handler = (dynamic result) {
       replyPort.close();
       if (_completeError(completer, result)) {
         return;
@@ -203,24 +239,26 @@ class LevelDB extends NativeDB {
     return completer.future;
   }
 
-  Future close() {
-    Completer completer = new Completer();
+  /// Close this database. Completes with `true`
+  Future<Null> close() {
+    Completer<Null> completer = new Completer<Null>();
     RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (result) {
+    replyPort.handler = (dynamic result) {
       replyPort.close();
       if (_completeError(completer, result)) {
         return;
       }
-      completer.complete(result);
+      completer.complete();
     };
     _close(replyPort.sendPort);
     return completer.future;
   }
 
-  get(key, { LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
-    Completer completer = new Completer();
+  /// Get a key in the database. Returns null if the key is not found.
+  Future<dynamic> get(dynamic key, { LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
+    Completer<dynamic> completer = new Completer<dynamic>();
     RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (result) {
+    replyPort.handler = (dynamic result) {
       replyPort.close();
       if (_completeError(completer, result)) {
         return;
@@ -228,48 +266,52 @@ class LevelDB extends NativeDB {
       if (result == 0) { // key not found
         completer.complete(null);
       } else if (result != null) {
-        completer.complete(valueEncoding._decode(result));
+        dynamic value = LevelEncoding._decodeValue(result, valueEncoding);
+        completer.complete(value);
       }
     };
-    _get(replyPort.sendPort, keyEncoding._encode(key));
+    key = LevelEncoding._encodeValue(key, keyEncoding);
+    _get(replyPort.sendPort, key);
     return completer.future;
   }
 
-  Future put(key, value, { bool sync: false, LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
-    Completer completer = new Completer();
+  /// Set a key to a value.
+  Future<Null> put(dynamic key, dynamic value, { bool sync: false, LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
+    Completer<Null> completer = new Completer<Null>();
     RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (result) {
+    replyPort.handler = (dynamic result) {
       replyPort.close();
       if (_completeError(completer, result)) {
         return;
       }
       completer.complete();
     };
-    _put(replyPort.sendPort, keyEncoding._encode(key), valueEncoding._encode(value), sync);
+    key = LevelEncoding._encodeValue(key, keyEncoding);
+    value = LevelEncoding._encodeValue(value, valueEncoding);
+    _put(replyPort.sendPort, key, value, sync);
     return completer.future;
   }
 
-  Future delete(key, { LevelEncoding keyEncoding: _ENCODING }) {
-    var completer = new Completer();
+  /// Remove a key from the database
+  Future<Null> delete(dynamic key, { LevelEncoding keyEncoding }) {
+    Completer<Null> completer = new Completer<Null>();
     RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (result) {
+    replyPort.handler = (dynamic result) {
       replyPort.close();
       if (_completeError(completer, result)) {
         return;
       }
       completer.complete();
     };
-    _delete(replyPort.sendPort, keyEncoding._encode(key));
+    key = LevelEncoding._encodeValue(key, keyEncoding);
+    _delete(replyPort.sendPort, key);
     return completer.future;
   }
 
-  /**
-   * Iterate through the db returning (key, value) tuples.
-   */
-  Stream<List> getItems({ gt, gte, lt, lte, int limit: -1, bool fillCache: true,
-      LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING }) {
-
-    LevelIterator iterator = LevelIterator._new(
+  /// Iterate through the db returning [key, value] lists.
+  Stream<List<dynamic>> getItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+      LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
+    _LevelIterator iterator = _LevelIterator._new(
         this,
         limit,
         fillCache,
@@ -280,19 +322,18 @@ class LevelDB extends NativeDB {
         keyEncoding,
         valueEncoding
     );
-
     return iterator._controller.stream;
   }
 
-  /**
-   * Some pretty API.
-   */
-  Stream getKeys({ gt, gte, lt, lte, int limit: -1, bool fillCache: true,
-    LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING}) =>
+  /// Iterate through the db returning keys
+  Stream<dynamic> getKeys({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+    LevelEncoding keyEncoding, LevelEncoding valueEncoding}) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
-          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List item) => item[0]);
-  Stream getValues({ gt, gte, lt, lte, int limit: -1, bool fillCache: true,
-    LevelEncoding keyEncoding: _ENCODING, LevelEncoding valueEncoding: _ENCODING}) =>
+          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List<dynamic> item) => item[0]);
+
+  /// Iterate through the db returning values
+  Stream<dynamic> getValues({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+    LevelEncoding keyEncoding, LevelEncoding valueEncoding}) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
-          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List item) => item[1]);
+          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List<dynamic> item) => item[1]);
 }
