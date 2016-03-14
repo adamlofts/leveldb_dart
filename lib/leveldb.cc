@@ -16,7 +16,6 @@
 const int BLOOM_BITS_PER_KEY = 10;
 
 // The max number of rows an iterator will send in response to a GetRows() message.
-// This is so that
 const int MAX_ROWS_PER_MESSAGE = 50000;
 
 Dart_NativeFunction ResolveName(Dart_Handle name,
@@ -172,23 +171,6 @@ static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersis
   NativeIterator* it_ref = (NativeIterator*) peer;
   iteratorFinalize(it_ref);
   delete it_ref;
-}
-
-
-/**
- * Add a finalizer to the NativeDB class so we call close() if the user has not already done so.
- */
-void dbInit(Dart_NativeArguments arguments) {
-  Dart_EnterScope();
-
-  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  int64_t value;
-  Dart_GetNativeIntegerArgument(arguments, 1, &value);
-
-  Dart_NewWeakPersistentHandle(arg0, (void*) value, 0 /* external_allocation_size */, NativeDBFinalizer);
-
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_ExitScope();
 }
 
 
