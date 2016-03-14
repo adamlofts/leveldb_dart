@@ -19,6 +19,10 @@ using namespace std;     // (or using namespace std if you want to use more of s
 
 const int BLOOM_BITS_PER_KEY = 10;
 
+// The max number of rows an iterator will send in response to a GetRows() message.
+// This is so that
+const int MAX_ROWS_PER_MESSAGE = 50000;
+
 Dart_NativeFunction ResolveName(Dart_Handle name,
                                 int argc,
                                 bool* auto_setup_scope);
@@ -370,7 +374,9 @@ void processMessageGetRows(NativeDB *native_db, Message *m) {
 
   leveldb::Slice end_slice = leveldb::Slice((char*)native_iterator->lt, native_iterator->lt_len);
 
-  while (!native_iterator->is_finalized) {
+  int count = 0;
+  bool is_finished = false;
+  while (!native_iterator->is_finalized && count < MAX_ROWS_PER_MESSAGE) {
     bool is_valid = it->Valid();
     bool is_limit_reached = native_iterator->limit >= 0 && native_iterator->count >= native_iterator->limit;
     bool is_query_limit_reached = false;
@@ -394,8 +400,7 @@ void processMessageGetRows(NativeDB *native_db, Message *m) {
       }
 
       if (!is_valid || is_query_limit_reached || is_limit_reached) {
-        // The iterator has reached the end of its rows. We can finalize it now.
-        iteratorFinalize(native_iterator);
+        is_finished = true;
         break;
       }
 
@@ -428,8 +433,19 @@ void processMessageGetRows(NativeDB *native_db, Message *m) {
 
       native_iterator->count += 1;
       it->Next();
+      count += 1;
   }
-  Dart_PostInteger(m->port_id, 0);
+
+  if (is_finished) {
+    Dart_PostInteger(m->port_id, 0);
+    // The iterator has reached the end of its rows. We can finalize it now.
+    iteratorFinalize(native_iterator);
+  } else {
+    // Iterator is not finished but we have sent a lot of rows. The dart side will finish processing the rows then
+    // ask for some more. This means we set a maximum on the number of rows buffered in the dart stream and we
+    // properly pause the iterator if requested.
+    Dart_PostInteger(m->port_id, 1);
+  }
 }
 
 
