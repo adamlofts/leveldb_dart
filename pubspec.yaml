@@ -1,6 +1,6 @@
 name: leveldb
 description: LevelDB dart bindings
-version: 0.0.4
+version: 0.0.5
 author: Adam Lofts <adam.lofts@gmail.com>
 dependencies:
 dev_dependencies:
