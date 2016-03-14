@@ -112,11 +112,14 @@ static void iteratorFinalize(NativeIterator *it_ref) {
   }
   it_ref->is_finalized = true;
 
-  // Remove the iterator from the db list
-  it_ref->native_db->iterators->remove(it_ref);
-
-  delete it_ref->iterator;
-  it_ref->iterator = NULL;
+  // This iterator will only be in the db list if the level db iterator has been created (i.e. the stream has
+  // started).
+  if (it_ref->iterator != NULL) {
+    // Remove the iterator from the db list
+    it_ref->native_db->iterators->remove(it_ref);
+    delete it_ref->iterator;
+    it_ref->iterator = NULL;
+  }
 
   delete it_ref->gt;
   delete it_ref->lt;
