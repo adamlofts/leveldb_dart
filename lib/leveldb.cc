@@ -2,14 +2,10 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <memory>
-#include <mutex>
 
 #include <queue>
 #include <list>
-
 #include <string>
-using namespace std;     // (or using namespace std if you want to use more of std.)
 
 #include "include/dart_api.h"
 #include "include/dart_native_api.h"
@@ -77,7 +73,7 @@ struct NativeDB {
   pthread_mutex_t mtx;
   pthread_t thread;
   pthread_cond_t cond;
-  std::list<Message*> *messages;
+  std::queue<Message*> *messages;
 
   bool is_closed;
   bool is_finalized;
@@ -312,7 +308,7 @@ void processMessagePut(NativeDB *native_db, Message *m) {
 void processMessageGet(NativeDB *native_db, Message *m) {
   leveldb::Slice key = leveldb::Slice(m->key, m->key_len);
   leveldb::Status s;
-  std:string value;
+  std::string value;
   s = native_db->db->Get(leveldb::ReadOptions(), key, &value);
 
   if (s.IsNotFound()) {
@@ -482,7 +478,7 @@ void* processMessages(void* ptr) {
       pthread_cond_wait(&native_db->cond, &native_db->mtx);
     }
     m = native_db->messages->front();
-    native_db->messages->pop_front();
+    native_db->messages->pop();
     pthread_mutex_unlock(&native_db->mtx);
 
     if (m->cmd == MESSAGE_CLOSE) {
@@ -503,7 +499,7 @@ void* processMessages(void* ptr) {
 
 void dbAddMessage(NativeDB* native_db, Message *m) {
   pthread_mutex_lock(&native_db->mtx);
-  native_db->messages->push_back(m);
+  native_db->messages->push(m);
   pthread_cond_signal(&native_db->cond);
   pthread_mutex_unlock(&native_db->mtx);
 }
@@ -526,7 +522,7 @@ void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path)
   NativeDB* native_db = new NativeDB();
   native_db->is_closed = false;
   native_db->is_finalized = false;
-  native_db->messages = new std::list<Message*>();
+  native_db->messages = new std::queue<Message*>();
   native_db->iterators = new std::list<NativeIterator*>();
 
   Dart_SetNativeInstanceField(arg0, 0, (intptr_t) native_db);
