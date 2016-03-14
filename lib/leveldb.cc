@@ -741,6 +741,8 @@ void dbClose(Dart_NativeArguments arguments) {  // (SendPort port)
   Message* m = new Message();
   m->port_id = port_id;
   m->cmd = MESSAGE_CLOSE;
+  m->key = NULL;
+  m->value = NULL;
   dbAddMessage(native_db, m);
 
   Dart_SetReturnValue(arguments, Dart_Null());
