@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:nativewrappers';
 
 import 'dart-ext:leveldb';
 
@@ -105,7 +106,7 @@ class _LevelEncodingNone implements LevelEncoding {
   Uint8List decode(Uint8List v) => throw new AssertionError();  // Never called
 }
 
-class _LevelIterator extends NativeIterator {
+class _LevelIterator extends NativeFieldWrapperClass2 {
 
   final LevelDB _db;
 
@@ -202,7 +203,7 @@ class _LevelIterator extends NativeIterator {
 }
 
 /// A key-value database
-class LevelDB extends NativeDB {
+class LevelDB extends NativeFieldWrapperClass2 {
 
   LevelDB._internal();
 

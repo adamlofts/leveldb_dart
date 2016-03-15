@@ -34,15 +34,6 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
     return result_code;
   }
 
-  result_code = Dart_CreateNativeWrapperClass(parent_library, Dart_NewStringFromCString("NativeDB"), 1);
-  if (Dart_IsError(result_code)) {
-    return result_code;
-  }
-  result_code = Dart_CreateNativeWrapperClass(parent_library, Dart_NewStringFromCString("NativeIterator"), 1);
-  if (Dart_IsError(result_code)) {
-    return result_code;
-  }
-
   return Dart_Null();
 }
 
