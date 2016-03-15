@@ -15,12 +15,20 @@ Future<LevelDB> _openTestDB({int index: 0}) async {
   return (await LevelDB.open('/tmp/test-level-db-dart-$index'));
 }
 
-const Matcher _isClosedError = const _ConcurrentModificationError._ClosedMatcher();
+const Matcher _isClosedError = const _ClosedMatcher();
 
-class _ConcurrentModificationError extends TypeMatcher {
-  const _ConcurrentModificationError._ClosedMatcher() : super("LevelDBClosedError");
+class _ClosedMatcher extends TypeMatcher {
+  const _ClosedMatcher() : super("LevelDBClosedError");
   @override
   bool matches(dynamic item, Map<dynamic, dynamic> matchState) => item is LevelDBClosedError;
+}
+
+const Matcher _isInvalidArgumentError = const _InvalidArgumentMatcher();
+
+class _InvalidArgumentMatcher extends TypeMatcher {
+  const _InvalidArgumentMatcher() : super("LevelInvalidArgumentError");
+  @override
+  bool matches(dynamic item, Map<dynamic, dynamic> matchState) => item is LevelInvalidArgumentError;
 }
 
 /// tests
@@ -211,6 +219,17 @@ void main() {
     }
 
     expect(isClosedSeen, equals(true));
+  });
+
+  test('Test no create if missing', () async {
+    expect(LevelDB.open('/tmp/test-level-db-dart-DOES-NOT-EXIST', createIfMissing: false), throwsA(_isInvalidArgumentError));
+  });
+
+  test('Test error if exists', () async {
+
+    LevelDB db = await LevelDB.open('/tmp/test-level-db-dart-exists');
+    await db.close();
+    expect(LevelDB.open('/tmp/test-level-db-dart-exists', errorIfExists: true), throwsA(_isInvalidArgumentError));
   });
 
 }

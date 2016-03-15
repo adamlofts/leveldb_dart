@@ -29,6 +29,16 @@ class LevelDBIOError extends LevelDBError {
   const LevelDBIOError._internal() : super._internal("IOError");
 }
 
+/// Exception thrown if the db is corrupted
+class LevelCorruptionError extends LevelDBError {
+  const LevelCorruptionError._internal() : super._internal("Corruption error");
+}
+
+/// Exception thrown if invalid argument (e.g. if the database does not exist and createIfMissing is false)
+class LevelInvalidArgumentError extends LevelDBError {
+  const LevelInvalidArgumentError._internal() : super._internal("Invalid argument");
+}
+
 /// Interface for specifying an encoding. The encoding must encode the object ot a Uint8List and decode
 /// from a Uint8List.
 abstract class LevelEncoding {
@@ -196,7 +206,7 @@ class LevelDB extends NativeDB {
 
   LevelDB._internal();
 
-  void _open(SendPort port, String path) native "DB_Open";
+  void _open(SendPort port, String path, int blockSize, bool createIfMissing, bool errorIfExists) native "DB_Open";
   void _put(SendPort port, Uint8List key, Uint8List value, bool sync) native "DB_Put";
   void _get(SendPort port, Uint8List key) native "DB_Get";
   void _delete(SendPort port, Uint8List key) native "DB_Delete";
@@ -209,6 +219,12 @@ class LevelDB extends NativeDB {
     }
     if (reply == -2) {
       return const LevelDBIOError._internal();
+    }
+    if (reply == -3) {
+      return const LevelCorruptionError._internal();
+    }
+    if (reply == -4) {
+      return const LevelInvalidArgumentError._internal();
     }
     return null;
   }
@@ -223,7 +239,7 @@ class LevelDB extends NativeDB {
   }
 
   /// Open a new database at `path`
-  static Future<LevelDB> open(String path) {
+  static Future<LevelDB> open(String path, {int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) {
     Completer<LevelDB> completer = new Completer<LevelDB>();
     RawReceivePort replyPort = new RawReceivePort();
 
@@ -235,7 +251,7 @@ class LevelDB extends NativeDB {
       }
       completer.complete(db);
     };
-    db._open(replyPort.sendPort, path);
+    db._open(replyPort.sendPort, path, blockSize, createIfMissing, errorIfExists);
     return completer.future;
   }
 

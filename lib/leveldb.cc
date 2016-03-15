@@ -53,7 +53,6 @@ struct NativeIterator;
 struct Message {
   int port_id;
   int cmd;
-  char* path;
 
   int key_len;
   char* key;
@@ -68,6 +67,11 @@ struct Message {
 
 struct NativeDB {
   leveldb::DB *db;
+
+  char* path;
+  int64_t block_size;
+  bool create_if_missing;
+  bool error_if_exists;
 
   pthread_mutex_t mtx;
   pthread_t thread;
@@ -134,6 +138,8 @@ static void finalizeDB(NativeDB *native_db) {
     return;
   }
   native_db->is_finalized = true;
+
+  delete native_db->path;
 
   // Finalize every iterator. The iterators remove themselves from the array.
   while (!native_db->iterators->empty()) {
@@ -250,7 +256,6 @@ const int MESSAGE_CLOSE = 5;
 
 
 void freeMessage(Message*m) {
-  delete m->path;
   delete m->key;
   delete m->value;
 
@@ -260,17 +265,28 @@ void freeMessage(Message*m) {
 
 void processMessageOpen(NativeDB *native_db, Message *m) {
   leveldb::Options options;
-  options.create_if_missing = true;
+  options.create_if_missing = native_db->create_if_missing;
+  options.error_if_exists = native_db->error_if_exists;
+  options.block_size = native_db->block_size;
   options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
 
   leveldb::DB* new_db;
-  leveldb::Status status = leveldb::DB::Open(options, m->path, &native_db->db);
+  leveldb::Status status = leveldb::DB::Open(options, native_db->path, &native_db->db);
 
   if (status.IsIOError()) {
     Dart_PostInteger(m->port_id, -2);
     return;
   }
-  assert(status.ok());
+  if (status.IsCorruption()) {
+    Dart_PostInteger(m->port_id, -3);
+    return;
+  }
+  // LevelDB does not provide Status::IsInvalidArgument so we just assume all other errors are invalid argument.
+  if (!status.ok()) {
+    Dart_PostInteger(m->port_id, -4);
+    return;
+  }
+
   Dart_PostInteger(m->port_id, 0);
 }
 
@@ -487,10 +503,19 @@ void dbAddMessage(NativeDB* native_db, Message *m) {
 }
 
 
-void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path)
+void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path, int blockSize, bool create_if_missing, bool error_if_exists)
   Dart_EnterScope();
 
+  NativeDB* native_db = new NativeDB();
+
+  native_db->is_closed = false;
+  native_db->is_finalized = false;
+  native_db->messages = new std::queue<Message*>();
+  native_db->iterators = new std::list<NativeIterator*>();
+  native_db->path = NULL;
+
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_SetNativeInstanceField(arg0, 0, (intptr_t) native_db);
 
   Dart_Port port_id;
   Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
@@ -499,20 +524,15 @@ void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path)
   const char* path;
   Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
   Dart_StringToCString(arg2, &path);
+  native_db->path = strdup(path);
 
-  // Allocate the db
-  NativeDB* native_db = new NativeDB();
-  native_db->is_closed = false;
-  native_db->is_finalized = false;
-  native_db->messages = new std::queue<Message*>();
-  native_db->iterators = new std::list<NativeIterator*>();
-
-  Dart_SetNativeInstanceField(arg0, 0, (intptr_t) native_db);
+  Dart_GetNativeIntegerArgument(arguments, 3, &native_db->block_size);
+  Dart_GetNativeBooleanArgument(arguments, 4, &native_db->create_if_missing);
+  Dart_GetNativeBooleanArgument(arguments, 5, &native_db->error_if_exists);
 
   // Create the open message
   Message* m = new Message();
   m->port_id = port_id;
-  m->path = strdup(path);
   m->key = NULL;
   m->value = NULL;
   dbAddMessage(native_db, m);
@@ -559,7 +579,6 @@ void dbPut(Dart_NativeArguments arguments) {  // (SendPort port, Uint8List key, 
   Message* m = new Message();
   m->port_id = port_id;
   m->cmd = MESSAGE_PUT;
-  m->path = NULL;
 
   Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
   Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg2);
@@ -611,7 +630,6 @@ void dbGet(Dart_NativeArguments arguments) {  // (SendPort port, Uint8List key)
   Message* m = new Message();
   m->port_id = port_id;
   m->cmd = MESSAGE_GET;
-  m->path = NULL;
 
   Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
   Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg2);
@@ -654,7 +672,6 @@ void dbDelete(Dart_NativeArguments arguments) {  // (SendPort port, Uint8List ke
   Message* m = new Message();
   m->port_id = port_id;
   m->cmd = MESSAGE_DELETE;
-  m->path = NULL;
 
   Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
   Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg2);
@@ -700,7 +717,6 @@ void dbGetRows(Dart_NativeArguments arguments) {  // (SendPort port, Leveliterat
   Message* m = new Message();
   m->port_id = port_id;
   m->cmd = MESSAGE_GET_ROWS;
-  m->path = NULL;
   m->key = NULL;
   m->value = NULL;
   m->iterator = native_iterator;
