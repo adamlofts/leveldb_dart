@@ -20,7 +20,7 @@ const Matcher _isClosedError = const _ClosedMatcher();
 class _ClosedMatcher extends TypeMatcher {
   const _ClosedMatcher() : super("LevelDBClosedError");
   @override
-  bool matches(dynamic item, Map<dynamic, dynamic> matchState) => item is LevelDBClosedError;
+  bool matches(dynamic item, Map<dynamic, dynamic> matchState) => item is LevelClosedError;
 }
 
 const Matcher _isInvalidArgumentError = const _InvalidArgumentMatcher();
@@ -149,7 +149,7 @@ void main() {
       await for (List<String> _ in db1.getItems()) {
         expect(true, equals(false)); // Should not happen.
       }
-    } on LevelDBClosedError {
+    } on LevelClosedError {
       expect(true, equals(true)); // Should happen.
     }
   });
@@ -159,7 +159,7 @@ void main() {
     try {
       await _openTestDB();
       expect(true, equals(false)); // Should not happen. The db is locked.
-    } on LevelDBIOError {
+    } on LevelIOError {
       expect(true, equals(true)); // Should happen.
     } finally {
       await db1.close();
@@ -214,7 +214,7 @@ void main() {
       await for (List<String> _ in db1.getItems()) {
         await db1.close();
       }
-    } on LevelDBClosedError catch (_) {
+    } on LevelClosedError catch (_) {
       isClosedSeen = true;
     }
 

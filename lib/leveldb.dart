@@ -12,30 +12,30 @@ import 'dart:convert';
 import 'dart-ext:leveldb';
 
 /// Base class for all exceptions thrown by leveldb_dart.
-abstract class LevelDBError implements Exception {
+abstract class LevelError implements Exception {
   final String _msg;
-  const LevelDBError._internal(this._msg);
+  const LevelError._internal(this._msg);
   @override
-  String toString() => 'LevelDBError: $_msg';
+  String toString() => 'LevelError: $_msg';
 }
 
 /// Exception thrown if the database is used after it has been closed.
-class LevelDBClosedError extends LevelDBError {
-  const LevelDBClosedError._internal() : super._internal("DB already closed");
+class LevelClosedError extends LevelError {
+  const LevelClosedError._internal() : super._internal("DB already closed");
 }
 
 /// Exception thrown if a general IO error is encountered.
-class LevelDBIOError extends LevelDBError {
-  const LevelDBIOError._internal() : super._internal("IOError");
+class LevelIOError extends LevelError {
+  const LevelIOError._internal() : super._internal("IOError");
 }
 
 /// Exception thrown if the db is corrupted
-class LevelCorruptionError extends LevelDBError {
+class LevelCorruptionError extends LevelError {
   const LevelCorruptionError._internal() : super._internal("Corruption error");
 }
 
 /// Exception thrown if invalid argument (e.g. if the database does not exist and createIfMissing is false)
-class LevelInvalidArgumentError extends LevelDBError {
+class LevelInvalidArgumentError extends LevelError {
   const LevelInvalidArgumentError._internal() : super._internal("Invalid argument");
 }
 
@@ -155,7 +155,7 @@ class _LevelIterator extends NativeIterator {
       gtEncoded = LevelEncoding._encodeValue(gt, keyEncoding);
     }
     int v = it._init(db, limit, fillCache, gtEncoded, isGtClosed, ltEncoded, isLtClosed);
-    LevelDBError e = LevelDB._getError(v);
+    LevelError e = LevelDB._getError(v);
     if (e != null) {
       throw e;
     }
@@ -171,7 +171,7 @@ class _LevelIterator extends NativeIterator {
   }
 
   void _handler(RawReceivePort port, dynamic result) {
-    LevelDBError e = LevelDB._getError(result);
+    LevelError e = LevelDB._getError(result);
     if (e != null) {
       port.close();
       _controller.addError(e);
@@ -213,12 +213,12 @@ class LevelDB extends NativeDB {
   void _getRows(SendPort port, _LevelIterator it) native "DB_GetRows";
   void _close(SendPort port) native "DB_Close";
 
-  static LevelDBError _getError(dynamic reply) {
+  static LevelError _getError(dynamic reply) {
     if (reply == -1) {
-      return const LevelDBClosedError._internal();
+      return const LevelClosedError._internal();
     }
     if (reply == -2) {
-      return const LevelDBIOError._internal();
+      return const LevelIOError._internal();
     }
     if (reply == -3) {
       return const LevelCorruptionError._internal();
@@ -230,7 +230,7 @@ class LevelDB extends NativeDB {
   }
 
   static bool _completeError(Completer<dynamic> completer, dynamic reply) {
-    LevelDBError e = _getError(reply);
+    LevelError e = _getError(reply);
     if (e != null) {
       completer.completeError(e);
       return true;
