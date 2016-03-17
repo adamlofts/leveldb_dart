@@ -524,6 +524,7 @@ void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path, i
   // Create the open message
   Message* m = new Message();
   m->port_id = port_id;
+  m->cmd = MESSAGE_OPEN;
   m->key = NULL;
   m->value = NULL;
   dbAddMessage(native_db, m);
