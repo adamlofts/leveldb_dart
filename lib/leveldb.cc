@@ -272,6 +272,7 @@ bool maybeSendError(Dart_Port port_id, leveldb::Status status) {
     Dart_PostInteger(port_id, -4);
     return true;
   }
+  return false;
 }
 
 
@@ -282,9 +283,7 @@ void processMessageOpen(NativeDB *native_db, Message *m) {
   options.block_size = native_db->block_size;
   options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
 
-  leveldb::DB* new_db;
   leveldb::Status status = leveldb::DB::Open(options, native_db->path, &native_db->db);
-
   if (maybeSendError(m->port_id, status)) {
     return;
   }
@@ -491,6 +490,8 @@ void* processMessages(void* ptr) {
   // Respond to the close message
   Dart_PostInteger(m->port_id, 0);
   freeMessage(m);
+
+  return NULL;
 }
 
 
