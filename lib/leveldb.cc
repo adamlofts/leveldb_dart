@@ -42,7 +42,7 @@ struct NativeIterator;
 
 
 struct Message {
-  int port_id;
+  Dart_Port port_id;
   int cmd;
 
   int key_len;
@@ -254,6 +254,27 @@ void freeMessage(Message*m) {
 }
 
 
+bool maybeSendError(Dart_Port port_id, leveldb::Status status) {
+  if (status.IsNotFound()) {
+    Dart_PostInteger(port_id, -5);
+    return true;
+  }
+  if (status.IsIOError()) {
+    Dart_PostInteger(port_id, -2);
+    return true;
+  }
+  if (status.IsCorruption()) {
+    Dart_PostInteger(port_id, -3);
+    return true;
+  }
+  // LevelDB does not provide Status::IsInvalidArgument so we just assume all other errors are invalid argument.
+  if (!status.ok()) {
+    Dart_PostInteger(port_id, -4);
+    return true;
+  }
+}
+
+
 void processMessageOpen(NativeDB *native_db, Message *m) {
   leveldb::Options options;
   options.create_if_missing = native_db->create_if_missing;
@@ -264,48 +285,34 @@ void processMessageOpen(NativeDB *native_db, Message *m) {
   leveldb::DB* new_db;
   leveldb::Status status = leveldb::DB::Open(options, native_db->path, &native_db->db);
 
-  if (status.IsIOError()) {
-    Dart_PostInteger(m->port_id, -2);
+  if (maybeSendError(m->port_id, status)) {
     return;
   }
-  if (status.IsCorruption()) {
-    Dart_PostInteger(m->port_id, -3);
-    return;
-  }
-  // LevelDB does not provide Status::IsInvalidArgument so we just assume all other errors are invalid argument.
-  if (!status.ok()) {
-    Dart_PostInteger(m->port_id, -4);
-    return;
-  }
-
   Dart_PostInteger(m->port_id, 0);
 }
 
 
 void processMessagePut(NativeDB *native_db, Message *m) {
-  leveldb::Status s;
   leveldb::WriteOptions options;
   options.sync = m->sync;
 
   leveldb::Slice key = leveldb::Slice(m->key, m->key_len);
   leveldb::Slice value = leveldb::Slice(m->value, m->value_len);
-  s = native_db->db->Put(options, key, value);
+  leveldb::Status status = native_db->db->Put(options, key, value);
+  if (maybeSendError(m->port_id, status)) {
+    return;
+  }
   Dart_PostInteger(m->port_id, 0);
 }
 
 
 void processMessageGet(NativeDB *native_db, Message *m) {
   leveldb::Slice key = leveldb::Slice(m->key, m->key_len);
-  leveldb::Status s;
   std::string value;
-  s = native_db->db->Get(leveldb::ReadOptions(), key, &value);
-
-  if (s.IsNotFound()) {
-    Dart_PostInteger(m->port_id, 0);
+  leveldb::Status status = native_db->db->Get(leveldb::ReadOptions(), key, &value);
+  if (maybeSendError(m->port_id, status)) {
     return;
   }
-
-  assert(s.ok());
 
   Dart_CObject result;
   result.type = Dart_CObject_kTypedData;
@@ -319,9 +326,10 @@ void processMessageGet(NativeDB *native_db, Message *m) {
 
 void processMessageDelete(NativeDB *native_db, Message *m) {
   leveldb::Slice key = leveldb::Slice(m->key, m->key_len);
-  leveldb::Status s;
-  s = native_db->db->Delete(leveldb::WriteOptions(), key);
-  assert(s.ok());
+  leveldb::Status status = native_db->db->Delete(leveldb::WriteOptions(), key);
+  if (maybeSendError(m->port_id, status)) {
+    return;
+  }
   Dart_PostInteger(m->port_id, 0);
 }
 

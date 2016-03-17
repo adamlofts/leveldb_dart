@@ -280,7 +280,7 @@ class LevelDB extends NativeFieldWrapperClass2 {
       if (_completeError(completer, result)) {
         return;
       }
-      if (result == 0) { // key not found
+      if (result == -5) { // key not found
         completer.complete(null);
       } else if (result != null) {
         dynamic value = LevelEncoding._decodeValue(result, valueEncoding);
