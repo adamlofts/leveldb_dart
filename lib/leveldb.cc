@@ -760,6 +760,176 @@ void dbClose(Dart_NativeArguments arguments) {  // (SendPort port)
   Dart_ExitScope();
 }
 
+// SYNC API
+
+void syncNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCache, gt, is_gt_closed, lt, is_lt_closed)
+  Dart_EnterScope();
+
+  NativeDB *native_db;
+  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
+  Dart_GetNativeInstanceField(arg1, 0, (intptr_t*) &native_db);
+
+  NativeIterator* it_ref = new NativeIterator();
+  it_ref->native_db = native_db;
+  it_ref->is_finalized = false;
+  it_ref->iterator = NULL;
+  it_ref->count = 0;
+
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_SetNativeInstanceField(arg0, 0, (intptr_t) it_ref);
+
+  Dart_GetNativeIntegerArgument(arguments, 2, &it_ref->limit);
+  Dart_GetNativeBooleanArgument(arguments, 3, &it_ref->is_fill_cache);
+
+  Dart_Handle arg5 = Dart_GetNativeArgument(arguments, 4);
+  if (Dart_IsNull(arg5)) {
+    it_ref->gt = NULL;
+    it_ref->gt_len = 0;
+  } else {
+    Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg5);
+    assert(typed_data_type == Dart_TypedData_kUint8);
+
+    char *data;
+    intptr_t len;
+    Dart_TypedDataAcquireData(arg5, &typed_data_type, (void**)&data, &len);
+    it_ref->gt_len = len;
+    it_ref->gt = (uint8_t*) malloc(len);
+    memcpy(it_ref->gt, data, len);
+    Dart_TypedDataReleaseData(arg5);
+  }
+
+  Dart_Handle arg6 = Dart_GetNativeArgument(arguments, 6);
+  if (Dart_IsNull(arg6)) {
+    it_ref->lt = NULL;
+    it_ref->lt_len = 0;
+  } else {
+    Dart_TypedData_Type typed_data_type = Dart_GetTypeOfTypedData(arg6);
+    assert(typed_data_type != Dart_TypedData_kInvalid);
+
+    char *data;
+    intptr_t len;
+    Dart_TypedDataAcquireData(arg6, &typed_data_type, (void**)&data, &len);
+    it_ref->lt_len = len;
+    it_ref->lt = (uint8_t*) malloc(len);
+    memcpy(it_ref->lt, data, len);
+    Dart_TypedDataReleaseData(arg6);
+  }
+
+  Dart_GetNativeBooleanArgument(arguments, 5, &it_ref->is_gt_closed);
+  Dart_GetNativeBooleanArgument(arguments, 7, &it_ref->is_lt_closed);
+
+  // We just pass the directly allocated size of the iterator here. The iterator holds a lot of other data in
+  // memory when it mmaps the files but I'm not sure how to account for it.
+  // Because the GC is not seeing all of the allocated memory it is important to manually call finalize() on the
+  // iterator when we are done with it (for example when the iterator reaches the end of its range).
+  Dart_NewWeakPersistentHandle(arg0, (void*) it_ref, /* external_allocation_size */ sizeof(NativeIterator), NativeIteratorFinalizer);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
+
+// http://stackoverflow.com/questions/2022179/c-quick-calculation-of-next-multiple-of-4
+uint32_t increaseToMultipleOf4(uint32_t v) {
+  return (v + 3) & ~0x03;
+}
+
+
+void syncNext(Dart_NativeArguments arguments) {  // (this)
+  Dart_EnterScope();
+
+  NativeIterator *native_iterator;
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_iterator);
+
+  NativeDB *native_db = native_iterator->native_db;
+  leveldb::Iterator* it = native_iterator->iterator;
+
+  // If it is NULL we need to create the iterator and perform the initial seek.
+  if (!native_db->is_finalized && it == NULL) {
+    leveldb::ReadOptions options;
+    options.fill_cache = native_iterator->is_fill_cache;
+    it = native_db->db->NewIterator(options);
+
+    native_iterator->iterator = it;
+    // Add the iterator to the db list. This is so we know to finalize it before finalizing the db.
+    native_db->iterators->push_back(native_iterator);
+
+    if (native_iterator->gt_len > 0) {
+      leveldb::Slice start_slice = leveldb::Slice((char*)native_iterator->gt, native_iterator->gt_len);
+      it->Seek(start_slice);
+
+      if (!native_iterator->is_gt_closed && it->Valid()) {
+      // If we are pointing at start_slice and not inclusive then we need to advance by 1
+      leveldb::Slice key = it->key();
+        if (key.compare(start_slice) == 0) {
+          it->Next();
+        }
+      }
+    } else {
+      it->SeekToFirst();
+    }
+  }
+
+  leveldb::Slice end_slice = leveldb::Slice((char*)native_iterator->lt, native_iterator->lt_len);
+  bool is_valid = false;
+  bool is_limit_reached = native_iterator->limit >= 0 && native_iterator->count >= native_iterator->limit;
+  bool is_query_limit_reached = false;
+
+  leveldb::Slice key;
+  leveldb::Slice value;
+  if (!native_iterator->is_finalized) {
+    is_valid = it->Valid();
+  }
+
+  if (is_valid) {
+    key = it->key();
+    value = it->value();
+
+    // Check if key is equal to end slice
+    if (native_iterator->lt_len > 0) {
+      int cmp = key.compare(end_slice);
+      if (cmp == 0 && !native_iterator->is_lt_closed) {  // key == end_slice and not closed
+        is_query_limit_reached = true;
+      }
+      if (cmp > 0) { // key > end_slice
+        is_query_limit_reached = true;
+      }
+    }
+  }
+
+  Dart_Handle result = Dart_Null();
+
+  if (!is_valid || is_query_limit_reached || is_limit_reached) {
+    // Iteration is finished. Any subsequent calls to syncNext() will return null so we can finalize the iterator
+    // here.
+    iteratorFinalize(native_iterator);
+  } else {
+    // Copy key and value into same buffer.
+    // Align the value array to a multiple of 4 bytes so the offset of the view in dart is a multiple of 4.
+    uint32_t key_size_mult_4 = increaseToMultipleOf4(key.size());
+    result = Dart_NewTypedData(Dart_TypedData_kUint8, key_size_mult_4 + value.size() + 4);
+    uint8_t *data;
+    intptr_t len;
+    Dart_TypedData_Type t;
+    Dart_TypedDataAcquireData(result, &t, (void**)&data, &len);
+    data[0] = key.size() & 0xFF;
+    data[1] = (key.size() >> 8) & 0xFF;
+    data[2] = key_size_mult_4 & 0xFF;
+    data[3] = (key_size_mult_4 >> 8) & 0xFF;
+    memcpy(data + 4, key.data(), key.size());
+    memcpy(data + 4 + key_size_mult_4, value.data(), value.size());
+    Dart_TypedDataReleaseData(result);
+
+    native_iterator->count += 1;
+    it->Next();
+  }
+
+  Dart_SetReturnValue(arguments, result);
+  Dart_ExitScope();
+}
+
+// Plugin
 
 struct FunctionLookup {
   const char* name;
@@ -776,6 +946,9 @@ FunctionLookup function_list[] = {
     {"DB_Close", dbClose},
 
     {"Iterator_New", iteratorNew},
+
+    {"SyncIterator_New", syncNew},
+    {"SyncIterator_Next", syncNext},
 
     {NULL, NULL}};
 

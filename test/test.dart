@@ -232,4 +232,82 @@ void main() {
     expect(LevelDB.open('/tmp/test-level-db-dart-exists', errorIfExists: true), throwsA(_isInvalidArgumentError));
   });
 
+  test('LevelDB sync iterator', () async {
+    LevelDB db = await _openTestDB();
+
+    await db.put("k1", "v");
+    await db.put("k2", "v");
+
+    // All keys
+    List<LevelItem> items = db.syncItems().toList();
+    expect(items.length, equals(2));
+    expect(items.map((LevelItem i) => i.key).toList(), equals(["k1", "k2"]));
+    expect(items.map((LevelItem i) => i.value).toList(), equals(["v", "v"]));
+
+    items = db.syncItems(keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none).toList();
+    expect(items.first.key, [107, 49]);
+
+    items = db.syncItems(gte: "k1").toList();
+    expect(items.length, equals(2));
+    items = db.syncItems(gt: "k1").toList();
+    expect(items.length, equals(1));
+
+    items = db.syncItems(gt: "k0").toList();
+    expect(items.length, equals(2));
+
+    items = db.syncItems(gt: "k5").toList();
+    expect(items.length, equals(0));
+    items = db.syncItems(gte: "k5").toList();
+    expect(items.length, equals(0));
+
+    items = db.syncItems(limit: 1).toList();
+    expect(items.length, equals(1));
+
+    items = db.syncItems(lte: "k2").toList();
+    expect(items.length, equals(2));
+    items = db.syncItems(lt: "k2").toList();
+    expect(items.length, equals(1));
+
+    items = db.syncItems(gt: "k1", lt: "k2").toList();
+    expect(items.length, equals(0));
+
+    items = db.syncItems(gte: "k1", lt: "k2").toList();
+    expect(items.length, equals(1));
+
+    items = db.syncItems(gt: "k1", lte: "k2").toList();
+    expect(items.length, equals(1));
+
+    items = db.syncItems(gte: "k1", lte: "k2").toList();
+    expect(items.length, equals(2));
+
+    String val = "bv-12345678901234567890123456789012345678901234567890123456789012345678901234567890";
+    await db.put("a", val);
+    LevelItem item = db.syncItems(lte: "a").first;
+    expect(item.value.length, val.length);
+
+    String longKey = "";
+    for (int _ in new Iterable<int>.generate(10)) {
+      longKey += val;
+    }
+    await db.put(longKey, longKey);
+    item = db.syncItems(gt: "a", lte: "c").first;
+    expect(item.value.length, longKey.length);
+
+    await db.close();
+  });
+
+  test('LevelDB sync iterator use after close', () async {
+      LevelDB db = await _openTestDB();
+
+      await db.put("k1", "v");
+      await db.put("k2", "v");
+
+      // All keys
+      Iterator<LevelItem> it = db.syncItems().iterator;
+      it.moveNext();
+
+      await db.close();
+
+      it.moveNext();
+  });
 }

@@ -9,6 +9,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:nativewrappers';
+import 'dart:collection';
 
 import 'dart-ext:leveldb';
 
@@ -353,4 +354,98 @@ class LevelDB extends NativeFieldWrapperClass2 {
     LevelEncoding keyEncoding, LevelEncoding valueEncoding}) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
           keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List<dynamic> item) => item[1]);
+
+  /// Return an iterable which will iterate through the db in key order returning key-value items. This iterable
+  /// is synchronous so will block when moving.
+  Iterable<LevelItem> syncItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+      LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
+    return new _SyncIterable._internal(this,
+        limit,
+        fillCache,
+        gt == null ? gte : gt,
+        gt == null,
+        lt == null ? lte : lt,
+        lt == null,
+        keyEncoding,
+        valueEncoding);
+  }
+}
+
+/// A key-value pair returned by the iterator
+class LevelItem {
+  /// The key. Type is determined by the keyEncoding specified
+  final dynamic key;
+  /// The value. Type is determinied by the valueEncoding specified
+  final dynamic value;
+  LevelItem._internal(this.key, this.value);
+}
+
+class _SyncIterator extends NativeFieldWrapperClass2 implements Iterator<LevelItem> {
+  final _SyncIterable _iterable;
+
+  _SyncIterator.internal(_SyncIterable it) :
+      _iterable = it;
+
+  int _init(LevelDB db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
+  List<dynamic> _next() native "SyncIterator_Next";
+  Uint8List _current;
+
+  dynamic get currentKey => LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4, (_current[1] << 8) + _current[0]), _iterable._keyEncoding);
+  dynamic get currentValue => LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4 + (_current[3] << 8) + _current[2]), _iterable._valueEncoding);
+
+  @override
+  LevelItem get current {
+    return new LevelItem._internal(currentKey, currentValue);
+  }
+
+  @override
+  bool moveNext() {
+    _current = _next();
+    return _current != null;
+  }
+}
+
+class _SyncIterable extends IterableBase<LevelItem> {
+  final LevelDB _db;
+
+  final int _limit;
+  final bool _fillCache;
+
+  final Object _gt;
+  final bool _isGtClosed;
+
+  final Object _lt;
+  final bool _isLtClosed;
+
+  final LevelEncoding _keyEncoding;
+  final LevelEncoding _valueEncoding;
+  final bool _isNoEncoding;
+
+  _SyncIterable._internal(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
+      _db = db,
+      _limit = limit,
+      _fillCache = fillCache,
+      _gt = gt,
+      _isGtClosed = isGtClosed,
+      _lt = lt,
+      _isLtClosed = isLtClosed,
+      _keyEncoding = keyEncoding,
+      _valueEncoding = valueEncoding,
+      _isNoEncoding = keyEncoding == const _LevelEncodingNone() && valueEncoding == const _LevelEncodingNone();
+
+  @override
+  Iterator<LevelItem> get iterator {
+    _SyncIterator ret = new _SyncIterator.internal(this);
+    Uint8List ltEncoded;
+    if (_lt != null) {
+      ltEncoded = LevelEncoding._encodeValue(_lt, _keyEncoding);
+    }
+    Uint8List gtEncoded;
+    if (_gt != null) {
+      gtEncoded = LevelEncoding._encodeValue(_gt, _keyEncoding);
+    }
+
+    ret._init(_db, _limit, _fillCache, gtEncoded, _isGtClosed, ltEncoded, _isLtClosed);
+    return ret;
+  }
 }
