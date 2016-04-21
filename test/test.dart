@@ -297,17 +297,31 @@ void main() {
   });
 
   test('LevelDB sync iterator use after close', () async {
-      LevelDB db = await _openTestDB();
+    LevelDB db = await _openTestDB();
 
-      await db.put("k1", "v");
-      await db.put("k2", "v");
+    await db.put("k1", "v");
+    await db.put("k2", "v");
 
-      // All keys
-      Iterator<LevelItem> it = db.syncItems().iterator;
-      it.moveNext();
+    // All keys
+    Iterator<LevelItem> it = db.syncItems().iterator;
+    it.moveNext();
 
-      await db.close();
+    await db.close();
 
-      it.moveNext();
+    it.moveNext();
+  });
+
+  test('LevelDB sync iterator current == null', () async {
+    LevelDB db = await _openTestDB();
+
+    await db.put("k1", "v");
+    Iterator<LevelItem> it = db.syncItems().iterator;
+    expect(it.current, null);
+    
+    it.moveNext();
+    expect(it.current.key, "k1");
+    it.moveNext();
+    expect(it.current, null);
+    await db.close();
   });
 }

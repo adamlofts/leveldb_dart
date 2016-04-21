@@ -395,7 +395,7 @@ class _SyncIterator extends NativeFieldWrapperClass2 implements Iterator<LevelIt
 
   @override
   LevelItem get current {
-    return new LevelItem._internal(currentKey, currentValue);
+    return _current == null ? null : new LevelItem._internal(currentKey, currentValue);
   }
 
   @override
