@@ -36,14 +36,14 @@ void main() {
   test('LevelDB', () async {
     LevelDB db = await _openTestDB();
 
-    await db.put("k1", "v");
-    await db.put("k2", "v");
+    db.put("k1", "v");
+    db.put("k2", "v");
 
-    expect(await db.get("k1"), equals("v"));
+    expect(db.get("k1"), equals("v"));
     List<String> keys = await db.getKeys().toList();
     expect(keys.first, equals("k1"));
 
-    String v = await db.get("DOESNOTEXIST");
+    String v = db.get("DOESNOTEXIST");
     expect(v, equals(null));
 
     // All keys
@@ -111,12 +111,12 @@ void main() {
   test('LevelDB delete', () async {
     LevelDB db = await _openTestDB();
     try {
-      await db.put("k1", "v");
-      await db.put("k2", "v");
+      db.put("k1", "v");
+      db.put("k2", "v");
 
-      await db.delete("k1");
+      db.delete("k1");
 
-      expect(await db.get("k1"), equals(null));
+      expect(db.get("k1"), equals(null));
       expect((await db.getItems().toList()).length, 1);
     } finally {
       await db.close();
@@ -140,13 +140,13 @@ void main() {
     LevelDB db1 = await _openTestDB();
     await db1.close();
 
-    expect(db1.get("SOME KEY"), throwsA(_isClosedError));
-    expect(db1.delete("SOME KEY"), throwsA(_isClosedError));
-    expect(db1.put("SOME KEY", "SOME KEY"), throwsA(_isClosedError));
+    expect(() => db1.get("SOME KEY"), throwsA(_isClosedError));
+    expect(() => db1.delete("SOME KEY"), throwsA(_isClosedError));
+    expect(() => db1.put("SOME KEY", "SOME KEY"), throwsA(_isClosedError));
     expect(db1.close(), throwsA(_isClosedError));
 
     try {
-      await for (List<String> _ in db1.getItems()) {
+      for (List<String> _ in db1.getItems()) {
         expect(true, equals(false)); // Should not happen.
       }
     } on LevelClosedError {
@@ -211,7 +211,7 @@ void main() {
     bool isClosedSeen = false;
 
     try {
-      await for (List<String> _ in db1.getItems()) {
+      for (LevelItem _ in db1.getItems()) {
         await db1.close();
       }
     } on LevelClosedError catch (_) {
@@ -235,62 +235,62 @@ void main() {
   test('LevelDB sync iterator', () async {
     LevelDB db = await _openTestDB();
 
-    await db.put("k1", "v");
-    await db.put("k2", "v");
+    db.put("k1", "v");
+    db.put("k2", "v");
 
     // All keys
-    List<LevelItem> items = db.syncItems().toList();
+    List<LevelItem> items = db.getItems().toList();
     expect(items.length, equals(2));
     expect(items.map((LevelItem i) => i.key).toList(), equals(["k1", "k2"]));
     expect(items.map((LevelItem i) => i.value).toList(), equals(["v", "v"]));
 
-    items = db.syncItems(keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none).toList();
+    items = db.getItems(keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none).toList();
     expect(items.first.key, [107, 49]);
 
-    items = db.syncItems(gte: "k1").toList();
+    items = db.getItems(gte: "k1").toList();
     expect(items.length, equals(2));
-    items = db.syncItems(gt: "k1").toList();
+    items = db.getItems(gt: "k1").toList();
     expect(items.length, equals(1));
 
-    items = db.syncItems(gt: "k0").toList();
+    items = db.getItems(gt: "k0").toList();
     expect(items.length, equals(2));
 
-    items = db.syncItems(gt: "k5").toList();
+    items = db.getItems(gt: "k5").toList();
     expect(items.length, equals(0));
-    items = db.syncItems(gte: "k5").toList();
-    expect(items.length, equals(0));
-
-    items = db.syncItems(limit: 1).toList();
-    expect(items.length, equals(1));
-
-    items = db.syncItems(lte: "k2").toList();
-    expect(items.length, equals(2));
-    items = db.syncItems(lt: "k2").toList();
-    expect(items.length, equals(1));
-
-    items = db.syncItems(gt: "k1", lt: "k2").toList();
+    items = db.getItems(gte: "k5").toList();
     expect(items.length, equals(0));
 
-    items = db.syncItems(gte: "k1", lt: "k2").toList();
+    items = db.getItems(limit: 1).toList();
     expect(items.length, equals(1));
 
-    items = db.syncItems(gt: "k1", lte: "k2").toList();
+    items = db.getItems(lte: "k2").toList();
+    expect(items.length, equals(2));
+    items = db.getItems(lt: "k2").toList();
     expect(items.length, equals(1));
 
-    items = db.syncItems(gte: "k1", lte: "k2").toList();
+    items = db.getItems(gt: "k1", lt: "k2").toList();
+    expect(items.length, equals(0));
+
+    items = db.getItems(gte: "k1", lt: "k2").toList();
+    expect(items.length, equals(1));
+
+    items = db.getItems(gt: "k1", lte: "k2").toList();
+    expect(items.length, equals(1));
+
+    items = db.getItems(gte: "k1", lte: "k2").toList();
     expect(items.length, equals(2));
 
     String val = "bv-12345678901234567890123456789012345678901234567890123456789012345678901234567890";
-    await db.put("a", val);
-    LevelItem item = db.syncItems(lte: "a").first;
+    db.put("a", val);
+    LevelItem item = db.getItems(lte: "a").first;
     expect(item.value.length, val.length);
 
     String longKey = "";
     for (int _ in new Iterable<int>.generate(10)) {
       longKey += val;
     }
-    await db.put(longKey, longKey);
-    item = db.syncItems(gt: "a", lte: "c").first;
+    db.put(longKey, longKey);
+    item = db.getItems(gt: "a", lte: "c").first;
     expect(item.value.length, longKey.length);
 
     await db.close();
@@ -299,23 +299,23 @@ void main() {
   test('LevelDB sync iterator use after close', () async {
     LevelDB db = await _openTestDB();
 
-    await db.put("k1", "v");
-    await db.put("k2", "v");
+    db.put("k1", "v");
+    db.put("k2", "v");
 
     // All keys
-    Iterator<LevelItem> it = db.syncItems().iterator;
+    Iterator<LevelItem> it = db.getItems().iterator;
     it.moveNext();
 
     await db.close();
 
-    it.moveNext();
+    expect(() => it.moveNext(), throwsA(_isClosedError));
   });
 
   test('LevelDB sync iterator current == null', () async {
     LevelDB db = await _openTestDB();
 
-    await db.put("k1", "v");
-    Iterator<LevelItem> it = db.syncItems().iterator;
+    db.put("k1", "v");
+    Iterator<LevelItem> it = db.getItems().iterator;
     expect(it.current, null);
     
     it.moveNext();

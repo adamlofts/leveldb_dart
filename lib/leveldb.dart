@@ -1,6 +1,4 @@
-// Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
-// for details. All rights reserved. Use of this source code is governed by a
-// BSD-style license that can be found in the LICENSE file.
+// Copyright (c) 2016 Adam Lofts
 
 library leveldb;
 
@@ -107,113 +105,17 @@ class _LevelEncodingNone implements LevelEncoding {
   Uint8List decode(Uint8List v) => throw new AssertionError();  // Never called
 }
 
-class _LevelIterator extends NativeFieldWrapperClass2 {
-
-  final LevelDB _db;
-
-  final LevelEncoding _keyEncoding;
-  final LevelEncoding _valueEncoding;
-  final bool _isNoEncoding;
-
-  StreamController<List<dynamic>> _controller;
-
-  bool _isStreaming;
-
-  _LevelIterator._internal(LevelDB db, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
-       _db = db,
-        _keyEncoding = keyEncoding,
-        _valueEncoding = valueEncoding,
-        _isNoEncoding = keyEncoding == const _LevelEncodingNone() && valueEncoding == const _LevelEncodingNone() {
-
-    _controller = new StreamController<List<dynamic>>(
-        onListen: () {
-          _isStreaming = true;
-          _getRows();
-        },
-        onPause: () {
-          _isStreaming = false;
-        },
-        onResume: () {
-          _isStreaming = true;
-          _getRows();
-        },
-        onCancel: () {
-          _isStreaming = false;
-        },
-        sync: true
-    );
-  }
-
-  Stream<List<dynamic>> get stream => _controller.stream;
-
-  static _LevelIterator _new(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) {
-    _LevelIterator it = new _LevelIterator._internal(db, keyEncoding, valueEncoding);
-    Uint8List ltEncoded;
-    if (lt != null) {
-      ltEncoded = LevelEncoding._encodeValue(lt, keyEncoding);
-    }
-    Uint8List gtEncoded;
-    if (gt != null) {
-      gtEncoded = LevelEncoding._encodeValue(gt, keyEncoding);
-    }
-    int v = it._init(db, limit, fillCache, gtEncoded, isGtClosed, ltEncoded, isLtClosed);
-    LevelError e = LevelDB._getError(v);
-    if (e != null) {
-      throw e;
-    }
-    return it;
-  }
-
-  int _init(LevelDB db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "Iterator_New";
-
-  void _getRows() {
-    RawReceivePort port = new RawReceivePort();
-    port.handler = (dynamic result) => _handler(port, result);
-    _db._getRows(port.sendPort, this);
-  }
-
-  void _handler(RawReceivePort port, dynamic result) {
-    LevelError e = LevelDB._getError(result);
-    if (e != null) {
-      port.close();
-      _controller.addError(e);
-      _controller.close();
-      return;
-    }
-
-    if (result == 0) { // Stream finished
-      port.close();
-      _controller.close();
-      return;
-    }
-
-    if (result == 1) { // maxRows reached
-      port.close();
-      if (_isStreaming) {
-        _getRows(); // Get some more rows.
-      }
-      return;
-    }
-
-    if (!_isNoEncoding) {
-      result[0] = LevelEncoding._decodeValue(result[0], _keyEncoding);
-      result[1] = LevelEncoding._decodeValue(result[1], _valueEncoding);
-    }
-    _controller.add(result);
-  }
-}
-
 /// A key-value database
 class LevelDB extends NativeFieldWrapperClass2 {
 
   LevelDB._internal();
 
   void _open(SendPort port, String path, int blockSize, bool createIfMissing, bool errorIfExists) native "DB_Open";
-  void _put(SendPort port, Uint8List key, Uint8List value, bool sync) native "DB_Put";
-  void _get(SendPort port, Uint8List key) native "DB_Get";
-  void _delete(SendPort port, Uint8List key) native "DB_Delete";
-  void _getRows(SendPort port, _LevelIterator it) native "DB_GetRows";
   void _close(SendPort port) native "DB_Close";
+
+  Uint8List _syncGet(Uint8List key) native "SyncGet";
+  void _syncPut(Uint8List key, Uint8List value, bool sync) native "SyncPut";
+  void _syncDelete(Uint8List key) native "SyncDelete";
 
   static LevelError _getError(dynamic reply) {
     if (reply == -1) {
@@ -273,91 +175,44 @@ class LevelDB extends NativeFieldWrapperClass2 {
   }
 
   /// Get a key in the database. Returns null if the key is not found.
-  Future<dynamic> get(dynamic key, { LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
-    Completer<dynamic> completer = new Completer<dynamic>();
-    RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (dynamic result) {
-      replyPort.close();
-      if (_completeError(completer, result)) {
-        return;
-      }
-      if (result == -5) { // key not found
-        completer.complete(null);
-      } else if (result != null) {
-        dynamic value = LevelEncoding._decodeValue(result, valueEncoding);
-        completer.complete(value);
-      }
-    };
-    key = LevelEncoding._encodeValue(key, keyEncoding);
-    _get(replyPort.sendPort, key);
-    return completer.future;
+  dynamic get(dynamic key, { LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
+    Uint8List keyEnc = LevelEncoding._encodeValue(key, keyEncoding);
+    Uint8List value = _syncGet(keyEnc);
+    Object ret;
+    if (value != null) {
+      ret = LevelEncoding._decodeValue(value, valueEncoding);
+    }
+    return ret;
   }
 
   /// Set a key to a value.
-  Future<Null> put(dynamic key, dynamic value, { bool sync: false, LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
-    Completer<Null> completer = new Completer<Null>();
-    RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (dynamic result) {
-      replyPort.close();
-      if (_completeError(completer, result)) {
-        return;
-      }
-      completer.complete();
-    };
-    key = LevelEncoding._encodeValue(key, keyEncoding);
-    value = LevelEncoding._encodeValue(value, valueEncoding);
-    _put(replyPort.sendPort, key, value, sync);
-    return completer.future;
+  void put(dynamic key, dynamic value, { bool sync: false, LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
+    Uint8List keyEnc = LevelEncoding._encodeValue(key, keyEncoding);
+    Uint8List valueEnc = LevelEncoding._encodeValue(value, valueEncoding);
+    _syncPut(keyEnc, valueEnc, sync);
   }
 
   /// Remove a key from the database
-  Future<Null> delete(dynamic key, { LevelEncoding keyEncoding }) {
-    Completer<Null> completer = new Completer<Null>();
-    RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (dynamic result) {
-      replyPort.close();
-      if (_completeError(completer, result)) {
-        return;
-      }
-      completer.complete();
-    };
-    key = LevelEncoding._encodeValue(key, keyEncoding);
-    _delete(replyPort.sendPort, key);
-    return completer.future;
-  }
-
-  /// Iterate through the db returning [key, value] lists.
-  Stream<List<dynamic>> getItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
-      LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
-    _LevelIterator iterator = _LevelIterator._new(
-        this,
-        limit,
-        fillCache,
-        gt == null ? gte : gt,
-        gt == null,
-        lt == null ? lte : lt,
-        lt == null,
-        keyEncoding,
-        valueEncoding
-    );
-    return iterator._controller.stream;
+  void delete(dynamic key, { LevelEncoding keyEncoding }) {
+    Uint8List keyEnc = LevelEncoding._encodeValue(key, keyEncoding);
+    _syncDelete(keyEnc);
   }
 
   /// Iterate through the db returning keys
-  Stream<dynamic> getKeys({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+  Iterable<dynamic> getKeys({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
     LevelEncoding keyEncoding, LevelEncoding valueEncoding}) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
-          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List<dynamic> item) => item[0]);
+          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((LevelItem item) => item.key);
 
   /// Iterate through the db returning values
-  Stream<dynamic> getValues({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+  Iterable<dynamic> getValues({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
     LevelEncoding keyEncoding, LevelEncoding valueEncoding}) =>
       getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
-          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((List<dynamic> item) => item[1]);
+          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((LevelItem item) => item.value);
 
   /// Return an iterable which will iterate through the db in key order returning key-value items. This iterable
   /// is synchronous so will block when moving.
-  Iterable<LevelItem> syncItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+  Iterable<LevelItem> getItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
       LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
     return new _SyncIterable._internal(this,
         limit,
