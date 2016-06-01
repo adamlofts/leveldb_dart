@@ -52,5 +52,5 @@ Future<dynamic> main() async {
   }
 
   // Close the db. This free's all resources associated with the db.
-  await db.close();
+  db.close();
 }

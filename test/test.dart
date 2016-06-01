@@ -105,7 +105,7 @@ void main() {
     keys = await db.getValues(lt: key, keyEncoding: LevelEncoding.none).toList();
     expect(keys.length, equals(1));
 
-    await db.close();
+    db.close();
   });
 
   test('LevelDB delete', () async {
@@ -119,7 +119,7 @@ void main() {
       expect(db.get("k1"), equals(null));
       expect((await db.getItems().toList()).length, 1);
     } finally {
-      await db.close();
+      db.close();
     }
   });
 
@@ -132,18 +132,18 @@ void main() {
     String v = await db2.get("a");
     expect(v, equals(null));
 
-    await db1.close();
-    await db2.close();
+    db1.close();
+    db2.close();
   });
 
   test('Usage after close()', () async {
     LevelDB db1 = await _openTestDB();
-    await db1.close();
+    db1.close();
 
     expect(() => db1.get("SOME KEY"), throwsA(_isClosedError));
     expect(() => db1.delete("SOME KEY"), throwsA(_isClosedError));
     expect(() => db1.put("SOME KEY", "SOME KEY"), throwsA(_isClosedError));
-    expect(db1.close(), throwsA(_isClosedError));
+    expect(() => db1.close(), throwsA(_isClosedError));
 
     try {
       for (List<String> _ in db1.getItems()) {
@@ -162,7 +162,7 @@ void main() {
     } on LevelIOError {
       expect(true, equals(true)); // Should happen.
     } finally {
-      await db1.close();
+      db1.close();
     }
   });
 
@@ -179,7 +179,7 @@ void main() {
     } catch (e) {
       // Pass
     } finally {
-      await db1.close();
+      db1.close();
     }
   });
 
@@ -200,7 +200,7 @@ void main() {
 
     await db1.delete(v, keyEncoding: LevelEncoding.none);
 
-    await db1.close();
+    db1.close();
   });
 
   test('Close inside iteration', () async {
@@ -212,7 +212,7 @@ void main() {
 
     try {
       for (LevelItem _ in db1.getItems()) {
-        await db1.close();
+        db1.close();
       }
     } on LevelClosedError catch (_) {
       isClosedSeen = true;
@@ -228,7 +228,7 @@ void main() {
   test('Test error if exists', () async {
 
     LevelDB db = await LevelDB.open('/tmp/test-level-db-dart-exists');
-    await db.close();
+    db.close();
     expect(LevelDB.open('/tmp/test-level-db-dart-exists', errorIfExists: true), throwsA(_isInvalidArgumentError));
   });
 
@@ -293,7 +293,7 @@ void main() {
     item = db.getItems(gt: "a", lte: "c").first;
     expect(item.value.length, longKey.length);
 
-    await db.close();
+    db.close();
   });
 
   test('LevelDB sync iterator use after close', () async {
@@ -306,7 +306,7 @@ void main() {
     Iterator<LevelItem> it = db.getItems().iterator;
     it.moveNext();
 
-    await db.close();
+    db.close();
 
     expect(() => it.moveNext(), throwsA(_isClosedError));
   });
@@ -322,6 +322,6 @@ void main() {
     expect(it.current.key, "k1");
     it.moveNext();
     expect(it.current, null);
-    await db.close();
+    db.close();
   });
 }

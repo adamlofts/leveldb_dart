@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include <queue>
 #include <list>
 #include <string>
 
@@ -40,21 +39,6 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
 struct NativeIterator;
 
 
-struct Message {
-  Dart_Port port_id;
-  int cmd;
-
-  int key_len;
-  char* key;
-
-  int value_len;
-  char* value;
-
-  bool sync;
-  NativeIterator *iterator;
-};
-
-
 struct NativeDB {
   leveldb::DB *db;
 
@@ -63,10 +47,8 @@ struct NativeDB {
   bool create_if_missing;
   bool error_if_exists;
 
-  pthread_mutex_t mtx;
+  Dart_Port open_port_id;
   pthread_t thread;
-  pthread_cond_t cond;
-  std::queue<Message*> *messages;
 
   bool is_closed;
   bool is_finalized;
@@ -170,18 +152,6 @@ static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersis
 }
 
 
-const int MESSAGE_OPEN = 0;
-const int MESSAGE_CLOSE = 5;
-
-
-void freeMessage(Message*m) {
-  delete m->key;
-  delete m->value;
-
-  delete m;
-}
-
-
 bool maybeSendError(Dart_Port port_id, leveldb::Status status) {
   if (status.IsNotFound()) {
     Dart_PostInteger(port_id, -5);
@@ -204,7 +174,8 @@ bool maybeSendError(Dart_Port port_id, leveldb::Status status) {
 }
 
 
-void processMessageOpen(NativeDB *native_db, Message *m) {
+void* runOpen(void* ptr) {
+  NativeDB *native_db = (NativeDB*) ptr;
   leveldb::Options options;
   options.create_if_missing = native_db->create_if_missing;
   options.error_if_exists = native_db->error_if_exists;
@@ -212,60 +183,11 @@ void processMessageOpen(NativeDB *native_db, Message *m) {
   options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
 
   leveldb::Status status = leveldb::DB::Open(options, native_db->path, &native_db->db);
-  if (maybeSendError(m->port_id, status)) {
-    return;
+  if (maybeSendError(native_db->open_port_id, status)) {
+    return NULL;
   }
-  Dart_PostInteger(m->port_id, 0);
-}
-
-
-void processMessage(NativeDB *native_db, Message *m) {
-  switch (m->cmd) {
-    case MESSAGE_OPEN:
-      processMessageOpen(native_db, m);
-      break;
-    default:
-      assert(false);
-  }
-}
-
-
-void* processMessages(void* ptr) {
-  NativeDB *native_db = (NativeDB*) ptr;
-  Message* m;
-
-  while (true) {
-    pthread_mutex_lock(&native_db->mtx);
-    while (native_db->messages->empty()) {
-      pthread_cond_wait(&native_db->cond, &native_db->mtx);
-    }
-    m = native_db->messages->front();
-    native_db->messages->pop();
-    pthread_mutex_unlock(&native_db->mtx);
-
-    if (m->cmd == MESSAGE_CLOSE) {
-      break;
-    }
-    processMessage(native_db, m);
-    freeMessage(m);
-  }
-
-  // Finalize. This will finalize all iterators and then the db.
-  finalizeDB(native_db);
-
-  // Respond to the close message
-  Dart_PostInteger(m->port_id, 0);
-  freeMessage(m);
-
+  Dart_PostInteger(native_db->open_port_id, 0);
   return NULL;
-}
-
-
-void dbAddMessage(NativeDB* native_db, Message *m) {
-  pthread_mutex_lock(&native_db->mtx);
-  native_db->messages->push(m);
-  pthread_cond_signal(&native_db->cond);
-  pthread_mutex_unlock(&native_db->mtx);
 }
 
 
@@ -276,7 +198,6 @@ void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path, i
 
   native_db->is_closed = false;
   native_db->is_finalized = false;
-  native_db->messages = new std::queue<Message*>();
   native_db->iterators = new std::list<NativeIterator*>();
   native_db->path = NULL;
 
@@ -296,23 +217,14 @@ void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path, i
   Dart_GetNativeBooleanArgument(arguments, 4, &native_db->create_if_missing);
   Dart_GetNativeBooleanArgument(arguments, 5, &native_db->error_if_exists);
 
-  // Create the open message
-  Message* m = new Message();
-  m->port_id = port_id;
-  m->cmd = MESSAGE_OPEN;
-  m->key = NULL;
-  m->value = NULL;
-  dbAddMessage(native_db, m);
+  native_db->open_port_id = port_id;
 
-  // Start the db thread
-  pthread_mutex_init(&native_db->mtx, NULL);
-  pthread_cond_init(&native_db->cond, NULL);
-
+  // Start the db open thread
   pthread_attr_t attr;
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-  int rc = pthread_create(&native_db->thread, &attr, processMessages, (void*)native_db);
+  int rc = pthread_create(&native_db->thread, &attr, runOpen, (void*)native_db);
   assert(rc == 0);
 
   pthread_attr_destroy(&attr);
@@ -323,38 +235,6 @@ void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path, i
   Dart_ExitScope();
 }
 
-
-void dbClose(Dart_NativeArguments arguments) {  // (SendPort port)
-  Dart_EnterScope();
-
-  NativeDB *native_db;
-  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
-
-  Dart_Port port_id;
-  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
-  Dart_SendPortGetId(arg1, &port_id);
-
-  if (native_db->is_closed) {
-    Dart_PostInteger(port_id, -1);
-    Dart_SetReturnValue(arguments, Dart_Null());
-    Dart_ExitScope();
-    return;
-  }
-
-  native_db->is_closed = true;
-
-  // Send the close message to the thread and join.
-  Message* m = new Message();
-  m->port_id = port_id;
-  m->cmd = MESSAGE_CLOSE;
-  m->key = NULL;
-  m->value = NULL;
-  dbAddMessage(native_db, m);
-
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_ExitScope();
-}
 
 // SYNC API
 
@@ -684,6 +564,25 @@ void syncDelete(Dart_NativeArguments arguments) {  // (this, key)
   Dart_ExitScope();
 }
 
+void syncClose(Dart_NativeArguments arguments) {  // (this)
+  Dart_EnterScope();
+
+  NativeDB *native_db;
+  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
+
+  if (native_db->is_closed) {
+    throwClosedException();
+    assert(false); // Not reached
+  }
+
+  native_db->is_closed = true;
+  finalizeDB(native_db);
+
+  Dart_SetReturnValue(arguments, Dart_Null());
+  Dart_ExitScope();
+}
+
 
 // Plugin
 
@@ -695,7 +594,6 @@ struct FunctionLookup {
 
 FunctionLookup function_list[] = {
     {"DB_Open", dbOpen},
-    {"DB_Close", dbClose},
 
     {"SyncIterator_New", syncNew},
     {"SyncIterator_Next", syncNext},
@@ -703,6 +601,7 @@ FunctionLookup function_list[] = {
     {"SyncGet", syncGet},
     {"SyncPut", syncPut},
     {"SyncDelete", syncDelete},
+    {"SyncClose", syncClose},
 
     {NULL, NULL}};
 

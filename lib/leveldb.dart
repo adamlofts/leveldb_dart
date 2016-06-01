@@ -111,11 +111,11 @@ class LevelDB extends NativeFieldWrapperClass2 {
   LevelDB._internal();
 
   void _open(SendPort port, String path, int blockSize, bool createIfMissing, bool errorIfExists) native "DB_Open";
-  void _close(SendPort port) native "DB_Close";
 
   Uint8List _syncGet(Uint8List key) native "SyncGet";
   void _syncPut(Uint8List key, Uint8List value, bool sync) native "SyncPut";
   void _syncDelete(Uint8List key) native "SyncDelete";
+  void _syncClose() native "SyncClose";
 
   static LevelError _getError(dynamic reply) {
     if (reply == -1) {
@@ -159,19 +159,10 @@ class LevelDB extends NativeFieldWrapperClass2 {
     return completer.future;
   }
 
-  /// Close this database. Completes with `true`
-  Future<Null> close() {
-    Completer<Null> completer = new Completer<Null>();
-    RawReceivePort replyPort = new RawReceivePort();
-    replyPort.handler = (dynamic result) {
-      replyPort.close();
-      if (_completeError(completer, result)) {
-        return;
-      }
-      completer.complete();
-    };
-    _close(replyPort.sendPort);
-    return completer.future;
+  /// Close this database.
+  /// Any pending iteration will throw after this call.
+  void close() {
+    _syncClose();
   }
 
   /// Get a key in the database. Returns null if the key is not found.
