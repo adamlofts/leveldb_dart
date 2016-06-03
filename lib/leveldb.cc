@@ -358,7 +358,7 @@ void syncNext(Dart_NativeArguments arguments) {  // (this)
   }
 
   // If it is NULL we need to create the iterator and perform the initial seek.
-  if (!native_db->is_finalized && it == NULL) {
+  if (!native_iterator->is_finalized && it == NULL) {
     leveldb::ReadOptions options;
     options.fill_cache = native_iterator->is_fill_cache;
     it = native_db->db->NewIterator(options);

@@ -320,8 +320,12 @@ void main() {
     
     it.moveNext();
     expect(it.current.key, "k1");
-    it.moveNext();
+    expect(it.moveNext(), false);
     expect(it.current, null);
+    for (int _ in new Iterable<int>.generate(10)) {
+      expect(it.moveNext(), false); // Dart requires that it is safe to call moveNext after the end.
+      expect(it.current, null);
+    }
     db.close();
   });
 }
