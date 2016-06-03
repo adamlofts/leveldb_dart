@@ -265,7 +265,6 @@ class _SyncIterable extends IterableBase<LevelItem> {
 
   final LevelEncoding _keyEncoding;
   final LevelEncoding _valueEncoding;
-  final bool _isNoEncoding;
 
   _SyncIterable._internal(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
       _db = db,
@@ -276,8 +275,7 @@ class _SyncIterable extends IterableBase<LevelItem> {
       _lt = lt,
       _isLtClosed = isLtClosed,
       _keyEncoding = keyEncoding,
-      _valueEncoding = valueEncoding,
-      _isNoEncoding = keyEncoding == const _LevelEncodingNone() && valueEncoding == const _LevelEncodingNone();
+      _valueEncoding = valueEncoding;
 
   @override
   Iterator<LevelItem> get iterator {
