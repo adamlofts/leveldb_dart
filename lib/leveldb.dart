@@ -226,17 +226,20 @@ class LevelItem {
   LevelItem._internal(this.key, this.value);
 }
 
-class _SyncIterator extends NativeFieldWrapperClass2 implements Iterator<LevelItem> {
+/// An iterator
+class LevelIterator extends NativeFieldWrapperClass2 implements Iterator<LevelItem> {
   final _SyncIterable _iterable;
 
-  _SyncIterator.internal(_SyncIterable it) :
+  LevelIterator._internal(_SyncIterable it) :
       _iterable = it;
 
   int _init(LevelDB db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
   List<dynamic> _next() native "SyncIterator_Next";
   Uint8List _current;
 
+  /// The key of the current LevelItem
   dynamic get currentKey => LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4, (_current[1] << 8) + _current[0]), _iterable._keyEncoding);
+  /// The value of the current LevelItem
   dynamic get currentValue => LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4 + (_current[3] << 8) + _current[2]), _iterable._valueEncoding);
 
   @override
@@ -279,7 +282,7 @@ class _SyncIterable extends IterableBase<LevelItem> {
 
   @override
   Iterator<LevelItem> get iterator {
-    _SyncIterator ret = new _SyncIterator.internal(this);
+    LevelIterator ret = new LevelIterator._internal(this);
     Uint8List ltEncoded;
     if (_lt != null) {
       ltEncoded = LevelEncoding._encodeValue(_lt, _keyEncoding);
