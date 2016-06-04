@@ -209,7 +209,7 @@ class LevelDB extends NativeFieldWrapperClass2 {
 class LevelItem {
   /// The key. Type is determined by the keyEncoding specified
   final dynamic key;
-  /// The value. Type is determinied by the valueEncoding specified
+  /// The value. Type is determined by the valueEncoding specified
   final dynamic value;
   LevelItem._internal(this.key, this.value);
 }
