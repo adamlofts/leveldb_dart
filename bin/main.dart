@@ -10,9 +10,7 @@ Future<dynamic> main() async {
   // open a database at a time.
   LevelDB db = await LevelDB.open("/tmp/testdb");
 
-  // All database operations are asynchronous. We use the dart await functionality to wait for
-  // the operation to complete before continuing.
-  // By default keys and values are dart strings.
+  // By default keys and values are strings.
   db.put("abc", "def");
 
   // Now get the key
@@ -41,6 +39,7 @@ Future<dynamic> main() async {
     print("Row: ${v.key} ${v.value}");  // prints Row: key-1 value-1, Row: key-2 value-2, Row: key-3 value-3
   }
 
+  // Iterate explicitly. This avoids allocation of LevelItem objects if you never call it.current.
   LevelIterator it = db.getItems(limit: 1).iterator;
   while (it.moveNext()) {
     print("${it.currentKey} ${it.currentValue}");
@@ -56,6 +55,12 @@ Future<dynamic> main() async {
     print("Value $value"); // Prints Key value-0, Key value-1, ...
   }
 
+  // Get the raw UInt8List data. This is faster since it avoids any decoding.
+  for (LevelItem item in db.getItems(keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none)) {
+    print("${item.key}"); // Prints [107, 101, 121, 45, 48], ...
+  }
+
   // Close the db. This free's all resources associated with the db.
+  // All iterators will throw if used after this call.
   db.close();
 }
