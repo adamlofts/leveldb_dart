@@ -40,69 +40,69 @@ void main() {
     db.put("k2", "v");
 
     expect(db.get("k1"), equals("v"));
-    List<String> keys = await db.getKeys().toList();
+    List<String> keys = db.getItems().keys.toList();
     expect(keys.first, equals("k1"));
 
     String v = db.get("DOESNOTEXIST");
     expect(v, equals(null));
 
     // All keys
-    keys = await db.getKeys().toList();
+    keys = db.getItems().keys.toList();
     expect(keys.length, equals(2));
-    keys = await db.getKeys(gte: "k1").toList();
+    keys = db.getItems(gte: "k1").keys.toList();
     expect(keys.length, equals(2));
-    keys = await db.getKeys(gt: "k1").toList();
+    keys = db.getItems(gt: "k1").keys.toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gt: "k0").toList();
+    keys = db.getItems(gt: "k0").keys.toList();
     expect(keys.length, equals(2));
 
-    keys = await db.getKeys(gt: "k5").toList();
+    keys = db.getItems(gt: "k5").keys.toList();
     expect(keys.length, equals(0));
-    keys = await db.getKeys(gte: "k5").toList();
-    expect(keys.length, equals(0));
-
-    keys = await db.getKeys(limit: 1).toList();
-    expect(keys.length, equals(1));
-
-    keys = await db.getKeys(lte: "k2").toList();
-    expect(keys.length, equals(2));
-    keys = await db.getKeys(lt: "k2").toList();
-    expect(keys.length, equals(1));
-
-    keys = await db.getKeys(gt: "k1", lt: "k2").toList();
+    keys = db.getItems(gte: "k5").keys.toList();
     expect(keys.length, equals(0));
 
-    keys = await db.getKeys(gte: "k1", lt: "k2").toList();
+    keys = db.getItems(limit: 1).keys.toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gt: "k1", lte: "k2").toList();
+    keys = db.getItems(lte: "k2").keys.toList();
+    expect(keys.length, equals(2));
+    keys = db.getItems(lt: "k2").keys.toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gte: "k1", lte: "k2").toList();
+    keys = db.getItems(gt: "k1", lt: "k2").keys.toList();
+    expect(keys.length, equals(0));
+
+    keys = db.getItems(gte: "k1", lt: "k2").keys.toList();
+    expect(keys.length, equals(1));
+
+    keys = db.getItems(gt: "k1", lte: "k2").keys.toList();
+    expect(keys.length, equals(1));
+
+    keys = db.getItems(gte: "k1", lte: "k2").keys.toList();
     expect(keys.length, equals(2));
 
     // Test with LevelEncodingNone
     Uint8List key = new Uint8List(2);
     key[0] = "k".codeUnitAt(0);
     key[1] = "1".codeUnitAt(0);
-    keys = await db.getKeys(gt: key, keyEncoding: LevelEncoding.none).toList();
+    keys = db.getItems(gt: key, keyEncoding: LevelEncoding.none).keys.toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(gte: key, keyEncoding: LevelEncoding.none).toList();
+    keys = db.getItems(gte: key, keyEncoding: LevelEncoding.none).keys.toList();
     expect(keys.length, equals(2));
 
     key[1] = "2".codeUnitAt(0);
-    keys = await db.getKeys(gt: key, keyEncoding: LevelEncoding.none).toList();
+    keys = db.getItems(gt: key, keyEncoding: LevelEncoding.none).keys.toList();
     expect(keys.length, equals(0));
 
-    keys = await db.getKeys(gte: key, keyEncoding: LevelEncoding.none).toList();
+    keys = db.getItems(gte: key, keyEncoding: LevelEncoding.none).keys.toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getKeys(lt: key, keyEncoding: LevelEncoding.none).toList();
+    keys = db.getItems(lt: key, keyEncoding: LevelEncoding.none).keys.toList();
     expect(keys.length, equals(1));
 
-    keys = await db.getValues(lt: key, keyEncoding: LevelEncoding.none).toList();
+    keys = db.getItems(lt: key, keyEncoding: LevelEncoding.none).values.toList();
     expect(keys.length, equals(1));
 
     db.close();

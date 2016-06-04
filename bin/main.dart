@@ -46,12 +46,12 @@ Future<dynamic> main() async {
   }
 
   // Just key iteration
-  for (dynamic key in db.getKeys()) {
+  for (dynamic key in db.getItems().keys) {
     print("Key $key"); // Prints Key key-0, Key key-1, ...
   }
 
   // Value iteration
-  for (dynamic value in db.getValues()) {
+  for (dynamic value in db.getItems().values) {
     print("Value $value"); // Prints Key value-0, Key value-1, ...
   }
 

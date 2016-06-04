@@ -189,18 +189,6 @@ class LevelDB extends NativeFieldWrapperClass2 {
     _syncDelete(keyEnc);
   }
 
-  /// Iterate through the db returning keys
-  Iterable<dynamic> getKeys({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
-    LevelEncoding keyEncoding, LevelEncoding valueEncoding}) =>
-      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
-          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((LevelItem item) => item.key);
-
-  /// Iterate through the db returning values
-  Iterable<dynamic> getValues({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
-    LevelEncoding keyEncoding, LevelEncoding valueEncoding}) =>
-      getItems(gt: gt, gte: gte, lt: lt, lte: lte, limit: limit, fillCache: fillCache,
-          keyEncoding: keyEncoding, valueEncoding: valueEncoding).map((LevelItem item) => item.value);
-
   /// Return an iterable which will iterate through the db in key order returning key-value items. This iterable
   /// is synchronous so will block when moving.
   LevelIterable getItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
@@ -295,5 +283,21 @@ class LevelIterable extends IterableBase<LevelItem> {
 
     ret._init(_db, _limit, _fillCache, gtEncoded, _isGtClosed, ltEncoded, _isLtClosed);
     return ret;
+  }
+
+  /// Returns an iterable of the keys in the db
+  Iterable<dynamic> get keys sync* {
+    LevelIterator it = iterator;
+    while (it.moveNext()) {
+      yield it.currentKey;
+    }
+  }
+
+  /// Returns an iterable of the values in the db
+  Iterable<dynamic> get values sync* {
+    LevelIterator it = iterator;
+    while (it.moveNext()) {
+      yield it.currentValue;
+    }
   }
 }
