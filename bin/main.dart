@@ -41,13 +41,18 @@ Future<dynamic> main() async {
     print("Row: ${v.key} ${v.value}");  // prints Row: key-1 value-1, Row: key-2 value-2, Row: key-3 value-3
   }
 
+  LevelIterator it = db.getItems(limit: 1).iterator;
+  while (it.moveNext()) {
+    print("${it.currentKey} ${it.currentValue}");
+  }
+
   // Just key iteration
-  for (String key in db.getKeys()) {
+  for (dynamic key in db.getKeys()) {
     print("Key $key"); // Prints Key key-0, Key key-1, ...
   }
 
   // Value iteration
-  for (String value in db.getValues()) {
+  for (dynamic value in db.getValues()) {
     print("Value $value"); // Prints Key value-0, Key value-1, ...
   }
 

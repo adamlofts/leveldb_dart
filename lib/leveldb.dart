@@ -203,9 +203,9 @@ class LevelDB extends NativeFieldWrapperClass2 {
 
   /// Return an iterable which will iterate through the db in key order returning key-value items. This iterable
   /// is synchronous so will block when moving.
-  Iterable<LevelItem> getItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
+  LevelIterable getItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
       LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
-    return new _SyncIterable._internal(this,
+    return new LevelIterable._internal(this,
         limit,
         fillCache,
         gt == null ? gte : gt,
@@ -228,9 +228,9 @@ class LevelItem {
 
 /// An iterator
 class LevelIterator extends NativeFieldWrapperClass2 implements Iterator<LevelItem> {
-  final _SyncIterable _iterable;
+  final LevelIterable _iterable;
 
-  LevelIterator._internal(_SyncIterable it) :
+  LevelIterator._internal(LevelIterable it) :
       _iterable = it;
 
   int _init(LevelDB db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
@@ -254,7 +254,8 @@ class LevelIterator extends NativeFieldWrapperClass2 implements Iterator<LevelIt
   }
 }
 
-class _SyncIterable extends IterableBase<LevelItem> {
+/// An iterable for the db which creates LevelIterator objects.
+class LevelIterable extends IterableBase<LevelItem> {
   final LevelDB _db;
 
   final int _limit;
@@ -269,7 +270,7 @@ class _SyncIterable extends IterableBase<LevelItem> {
   final LevelEncoding _keyEncoding;
   final LevelEncoding _valueEncoding;
 
-  _SyncIterable._internal(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
+  LevelIterable._internal(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
       _db = db,
       _limit = limit,
       _fillCache = fillCache,
@@ -281,7 +282,7 @@ class _SyncIterable extends IterableBase<LevelItem> {
       _valueEncoding = valueEncoding;
 
   @override
-  Iterator<LevelItem> get iterator {
+  LevelIterator get iterator {
     LevelIterator ret = new LevelIterator._internal(this);
     Uint8List ltEncoded;
     if (_lt != null) {
