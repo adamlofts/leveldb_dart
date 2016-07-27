@@ -40,7 +40,7 @@ void main() {
     db.put("k2", "v");
 
     expect(db.get("k1"), equals("v"));
-    List<String> keys = db.getItems().keys.toList();
+    List<dynamic> keys = db.getItems().keys.toList();
     expect(keys.first, equals("k1"));
 
     String v = db.get("DOESNOTEXIST");
@@ -146,7 +146,7 @@ void main() {
     expect(() => db1.close(), throwsA(_isClosedError));
 
     try {
-      for (List<String> _ in db1.getItems()) {
+      for (LevelItem _ in db1.getItems()) {
         expect(true, equals(false)); // Should not happen.
       }
     } on LevelClosedError {
@@ -173,7 +173,7 @@ void main() {
     await db1.put("c", "1");
 
     try {
-      await for (List<String> _ in db1.getItems()) {
+      for (LevelItem _ in db1.getItems()) {
         throw new Exception("OH NO");
       }
     } catch (e) {
@@ -241,11 +241,11 @@ void main() {
     // All keys
     List<LevelItem> items = db.getItems().toList();
     expect(items.length, equals(2));
-    expect(items.map((LevelItem i) => i.key).toList(), equals(["k1", "k2"]));
-    expect(items.map((LevelItem i) => i.value).toList(), equals(["v", "v"]));
+    expect(items.map((LevelItem i) => i.key).toList(), equals(<String>["k1", "k2"]));
+    expect(items.map((LevelItem i) => i.value).toList(), equals(<String>["v", "v"]));
 
     items = db.getItems(keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none).toList();
-    expect(items.first.key, [107, 49]);
+    expect(items.first.key, <int>[107, 49]);
 
     items = db.getItems(gte: "k1").toList();
     expect(items.length, equals(2));
