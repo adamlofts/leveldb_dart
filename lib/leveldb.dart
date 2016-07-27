@@ -47,7 +47,7 @@ abstract class LevelEncoding {
   /// Decode from a Uint8List
   dynamic decode(Uint8List v);
 
-  /// The none encoding does not encoding. You must pass in a Uint8List to all fucntions.
+  /// The none encoding does no encoding. You must pass in a Uint8List to all fucntions.
   /// Because it does no transformation it reduces the number of allocations.
   /// Use this encoding for performance.
   static LevelEncoding get none => const _LevelEncodingNone();
@@ -55,10 +55,10 @@ abstract class LevelEncoding {
   /// Default encoding. Expects to be passed a String and will encode/decode to UTF8 in the db.
   static LevelEncoding get utf8 => const _LevelEncodingUtf8();
 
-  /// Ascii encoding. Potentially faster than UTF8 (untested).
+  /// Ascii encoding. Potentially faster than UTF8 for ascii-only text (untested).
   static LevelEncoding get ascii => const _LevelEncodingAscii();
 
-  static dynamic _encodeValue(dynamic v, LevelEncoding encoding) {
+  static Uint8List _encodeValue(dynamic v, LevelEncoding encoding) {
     if (encoding == const _LevelEncodingNone()) {
       return v;
     }
