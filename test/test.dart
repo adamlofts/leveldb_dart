@@ -315,17 +315,24 @@ void main() {
     LevelDB db = await _openTestDB();
 
     db.put("k1", "v");
-    Iterator<LevelItem> it = db.getItems().iterator;
+    LevelIterator it = db.getItems().iterator;
     expect(it.current, null);
-    
+    expect(it.currentKey, null);
+    expect(it.currentValue, null);
+
     it.moveNext();
     expect(it.current.key, "k1");
+    expect(it.currentKey, "k1");
+    expect(it.currentValue, "v");
     expect(it.moveNext(), false);
     expect(it.current, null);
     for (int _ in new Iterable<int>.generate(10)) {
       expect(it.moveNext(), false); // Dart requires that it is safe to call moveNext after the end.
       expect(it.current, null);
+      expect(it.currentKey, null);
+      expect(it.currentValue, null);
     }
     db.close();
   });
+
 }

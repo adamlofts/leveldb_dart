@@ -226,9 +226,11 @@ class LevelIterator extends NativeFieldWrapperClass2 implements Iterator<LevelIt
   Uint8List _current;
 
   /// The key of the current LevelItem
-  dynamic get currentKey => LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4, (_current[1] << 8) + _current[0]), _iterable._keyEncoding);
+  dynamic get currentKey =>
+      _current == null ? null : LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4, (_current[1] << 8) + _current[0]), _iterable._keyEncoding);
   /// The value of the current LevelItem
-  dynamic get currentValue => LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4 + (_current[3] << 8) + _current[2]), _iterable._valueEncoding);
+  dynamic get currentValue =>
+      _current == null ? null : LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4 + (_current[3] << 8) + _current[2]), _iterable._valueEncoding);
 
   @override
   LevelItem get current {
