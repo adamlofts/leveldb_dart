@@ -83,7 +83,7 @@ class _LevelEncodingUtf8 implements LevelEncoding {
   /// Default UTF8 encoding.
   const _LevelEncodingUtf8();
   @override
-  Uint8List encode(String v) => new Uint8List.fromList(UTF8.encode(v));
+  Uint8List encode(dynamic v) => new Uint8List.fromList(UTF8.encode(v));
   @override
   String decode(Uint8List v) => UTF8.decode(v);
 }
@@ -92,7 +92,7 @@ class _LevelEncodingAscii implements LevelEncoding {
   // Ascii encoding
   const _LevelEncodingAscii();
   @override
-  Uint8List encode(String v) => new Uint8List.fromList(const AsciiCodec().encode(v));
+  Uint8List encode(dynamic v) => new Uint8List.fromList(const AsciiCodec().encode(v));
   @override
   String decode(Uint8List v) => const AsciiCodec().decode(v);
 }
@@ -100,7 +100,7 @@ class _LevelEncodingAscii implements LevelEncoding {
 class _LevelEncodingNone implements LevelEncoding {
   const _LevelEncodingNone();
   @override
-  Uint8List encode(Uint8List v) => throw new AssertionError();  // Never called
+  Uint8List encode(dynamic v) => throw new AssertionError();  // Never called
   @override
   Uint8List decode(Uint8List v) => throw new AssertionError();  // Never called
 }

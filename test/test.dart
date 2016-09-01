@@ -117,7 +117,7 @@ void main() {
       db.delete("k1");
 
       expect(db.get("k1"), equals(null));
-      expect((await db.getItems().toList()).length, 1);
+      expect(db.getItems().length, 1);
     } finally {
       db.close();
     }
@@ -127,7 +127,7 @@ void main() {
     LevelDB db1 = await _openTestDB();
     LevelDB db2 = await _openTestDB(index: 1);
 
-    await db1.put("a", "1");
+    db1.put("a", "1");
 
     String v = await db2.get("a");
     expect(v, equals(null));
@@ -168,9 +168,9 @@ void main() {
 
   test('Exception inside iteration', () async {
     LevelDB db1 = await _openTestDB();
-    await db1.put("a", "1");
-    await db1.put("b", "1");
-    await db1.put("c", "1");
+    db1.put("a", "1");
+    db1.put("b", "1");
+    db1.put("c", "1");
 
     try {
       for (LevelItem _ in db1.getItems()) {
@@ -187,7 +187,7 @@ void main() {
     LevelDB db1 = await _openTestDB();
     Uint8List v = new Uint8List.fromList(UTF8.encode("key1"));
 
-    await db1.put(v, v, keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none);
+    db1.put(v, v, keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none);
 
     String s = await db1.get("key1");
     expect(s, equals("key1"));
@@ -198,15 +198,15 @@ void main() {
     Uint8List v2 = await db1.get(v, keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none);
     expect(v2, equals(v));
 
-    await db1.delete(v, keyEncoding: LevelEncoding.none);
+    db1.delete(v, keyEncoding: LevelEncoding.none);
 
     db1.close();
   });
 
   test('Close inside iteration', () async {
     LevelDB db1 = await _openTestDB();
-    await db1.put("a", "1");
-    await db1.put("b", "1");
+    db1.put("a", "1");
+    db1.put("b", "1");
 
     bool isClosedSeen = false;
 
