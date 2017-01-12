@@ -5,10 +5,6 @@ leveldb_dart
 
 **Fast & simple storage - a Dart LevelDB wrapper**
 
-  * <a href="#intro">Introduction</a>
-  * <a href="#basic">Basic usage</a>
-
-<a name="intro"></a>
 Introduction
 ------------
 
@@ -18,28 +14,33 @@ Introduction
 
 LevelDB stores entries **sorted lexicographically by keys**. This makes leveldb_darts's <code>getItems</code> interface a very powerful query mechanism.
 
-<a name="basic"></a>
-Basic usage (Ubuntu / Debian)
+Platform Support
+----------------
+
+Only linux amd64 platform is supported.
+
+Basic usage
 -----------
 
-leveldb_dart is a Dart native extension so adding it as a pub dependency is a two step process.
+Add `leveldb` to your `pubspec.yaml` file.
 
-First you need to install and build leveldb_dart. 
-
-```sh
-$ apt-get install libleveldb-dev
-$ git clone https://github.com/adamlofts/leveldb_dart.git
-$ cd leveldb_dart
-$ DART_SDK=/path/to/dart-sdk make
 ```
-
-Now add leveldb_dart as a path dependency in your pubspec.yaml file.
-```yaml
-name: my_project
-...
+name: myproject
 dependencies:
   leveldb:
-    path: /my/path/to/leveldb_dart
 ```
 
-Check out [bin/main.dart](bin/main.dart) for example usage.
+Open a database and read/write some files.
+
+```
+import 'dart:async';
+import 'package:leveldb/leveldb.dart';
+
+Future main() async {
+  LevelDB db = await LevelDB.open("/tmp/testdb1");
+  db.put("abc", "def");
+  String value = db.get("abc");
+  print("value is $value"); // value2 is def
+}
+```
+Check out [example/main.dart](example/main.dart) for more example code.
