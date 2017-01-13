@@ -12,12 +12,12 @@ Introduction
 
 **leveldb_dart** aims to expose the features of LevelDB in a **Dart-friendly way**.
 
-LevelDB stores entries **sorted lexicographically by keys**. This makes leveldb_darts's <code>getItems</code> interface a very powerful query mechanism.
+LevelDB stores entries **sorted lexicographically by keys**. This makes leveldb's `getItems` interface a very powerful query mechanism.
 
 Platform Support
 ----------------
 
-Only linux amd64 platform is supported.
+Only linux 64-bit platform is supported.
 
 Basic usage
 -----------
@@ -30,7 +30,7 @@ dependencies:
   leveldb:
 ```
 
-Open a database and read/write some files.
+Open a database and read/write some keys and values..
 
 ```
 import 'dart:async';
@@ -43,4 +43,16 @@ Future main() async {
   print("value is $value"); // value2 is def
 }
 ```
-Check out [example/main.dart](example/main.dart) for more example code.
+Check out [example/main.dart](example/main.dart) to see how to read, write and iterate over keys and values.
+
+Feature Support
+---------------
+- [x] Read and write keys
+- [x] Forward iteration
+- [ ] Backward iteration
+- [ ] Snapshots
+- [ ] Bulk get / put
+
+
+
+
