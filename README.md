@@ -1,9 +1,6 @@
-leveldb_dart
-=======
+*Fast & simple storage - a Dart LevelDB wrapper*
 
 <img alt="LevelDB Logo" height="100" src="http://leveldb.org/img/logo.svg">
-
-**Fast & simple storage - a Dart LevelDB wrapper**
 
 Introduction
 ------------
