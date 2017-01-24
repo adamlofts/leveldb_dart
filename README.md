@@ -2,6 +2,8 @@
 
 <img alt="LevelDB Logo" height="100" src="http://leveldb.org/img/logo.svg">
 
+<img alt="Build Status" src="https://travis-ci.org/adamlofts/leveldb_dart.svg?branch=master">
+
 Introduction
 ------------
 
