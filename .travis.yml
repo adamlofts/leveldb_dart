@@ -1,5 +1,15 @@
 language: dart
-dart:
-  # Install the latest stable release
-  - stable
 
+# By default the latest stable dart release is used.
+#dart:
+  # Install the latest stable release
+  #- stable
+
+# Run tests on precise and trusty. They have a different gcc abi.
+matrix:
+  include:
+    - os: linux
+      dist: trusty
+
+    - os: linux
+      dist: precise
