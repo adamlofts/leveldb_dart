@@ -5,7 +5,10 @@
 Introduction
 ------------
 
-**[LevelDB](https://github.com/google/leveldb)** is a simple key/value data store built by Google, inspired by BigTable. It's used in Google Chrome and many other products. LevelDB supports arbitrary byte arrays as both keys and values, singular *get*, *put* and *delete* operations, *batched put and delete*, bi-directional iterators and simple compression using the very fast [Snappy](http://google.github.io/snappy/) algorithm.
+**[LevelDB](https://github.com/google/leveldb)** is a simple key/value data store built by Google, inspired by BigTable. It's used in Google
+Chrome and many other products. LevelDB supports arbitrary byte arrays as both keys and values, singular *get*, *put* and *delete*
+operations, *batched put and delete*, bi-directional iterators and simple compression using the very fast
+[Snappy](http://google.github.io/snappy/) algorithm.
 
 **leveldb_dart** aims to expose the features of LevelDB in a **Dart-friendly way**.
 
@@ -14,7 +17,13 @@ LevelDB stores entries **sorted lexicographically by keys**. This makes leveldb'
 Platform Support
 ----------------
 
-Only linux 64-bit platform is supported.
+Only linux 64-bit platform is supported. The following distributions have been tested:
+
+* Fedora 25
+* Ubuntu 14.04
+* Ubuntu 15.10
+
+If your platform works and is not listed please let me know so I can add it.
 
 Basic usage
 -----------
