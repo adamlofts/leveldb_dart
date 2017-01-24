@@ -7,3 +7,5 @@ pubspec.lock
 lib/*.o
 .idea/libraries/*.xml
 .idea/vcs.xml
+.idea/markdown-navigator.xml
+.idea/markdown-navigator/
