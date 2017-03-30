@@ -53,6 +53,11 @@ Future main() async {
 ```
 Check out [example/main.dart](example/main.dart) to see how to read, write and iterate over keys and values.
 
+Documentation
+-------------
+
+API Documentation is available at https://www.dartdocs.org/documentation/leveldb/latest/
+
 Feature Support
 ---------------
 - [x] Read and write keys
