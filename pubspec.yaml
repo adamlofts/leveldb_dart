@@ -3,6 +3,8 @@ description: LevelDB dart bindings
 version: 3.0.0-beta
 author: Adam Lofts <adam.lofts@gmail.com>
 homepage: https://github.com/adamlofts/leveldb_dart
+environment:
+  sdk: ">=1.23.0"
 dependencies:
 dev_dependencies:
   test: "^0.12.20+10"
