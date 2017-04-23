@@ -13,19 +13,19 @@
 
 # Then set the source:
 
-LEVELDB_SOURCE=/home/adam/dev/fp3/dart/leveldb-1.19
+LEVELDB_SOURCE=/home/adam/dev/fp3/dart/leveldb-1.20
 DART_SDK=/home/adam/dev/tools/dart-sdk
 
 all: lib/libleveldb.so
 
 LIBS=$(LEVELDB_SOURCE)/out-static/libleveldb.a
-ARGS=-Wall -D_GLIBCXX_USE_CXX11_ABI=0
+ARGS=-O2 -Wall -D_GLIBCXX_USE_CXX11_ABI=0
 
 lib/leveldb.o: lib/leveldb.cc
-	g++ -O2 $(ARGS) -fPIC -I$(DART_SDK) -I$(LEVELDB_SOURCE)/include -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o
+	g++ $(ARGS) -fPIC -I$(DART_SDK) -I$(LEVELDB_SOURCE)/include -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o
 
 lib/libleveldb.so: lib/leveldb.o
-	gcc -O2 $(ARGS) lib/leveldb.o -shared -Wl,-soname,libleveldb.so -o lib/libleveldb.so $(LIBS)
+	gcc $(ARGS) lib/leveldb.o -shared -Wl,-soname,libleveldb.so -o lib/libleveldb.so $(LIBS)
 
 clean:
 	rm -f lib/*.o lib/*.so

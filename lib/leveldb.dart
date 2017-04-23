@@ -110,7 +110,7 @@ class LevelDB extends NativeFieldWrapperClass2 {
 
   LevelDB._internal();
 
-  void _open(SendPort port, String path, int blockSize, bool createIfMissing, bool errorIfExists) native "DB_Open";
+  void _open(bool shared, SendPort port, String path, int blockSize, bool createIfMissing, bool errorIfExists) native "DB_Open";
 
   Uint8List _syncGet(Uint8List key) native "SyncGet";
   void _syncPut(Uint8List key, Uint8List value, bool sync) native "SyncPut";
@@ -142,8 +142,12 @@ class LevelDB extends NativeFieldWrapperClass2 {
     return false;
   }
 
-  /// Open a new database at `path`
-  static Future<LevelDB> open(String path, {int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) {
+  /// Open a database at [path]
+  ///
+  /// If [shared] is true the database will be shared to other isolates in the dart vm. The [LevelDB] returned
+  /// in another isolate calling [open] with the same [path] will share the underlying database and data changes
+  /// will be visible to both.
+  static Future<LevelDB> open(String path, {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) {
     Completer<LevelDB> completer = new Completer<LevelDB>();
     RawReceivePort replyPort = new RawReceivePort();
 
@@ -155,7 +159,7 @@ class LevelDB extends NativeFieldWrapperClass2 {
       }
       completer.complete(db);
     };
-    db._open(replyPort.sendPort, path, blockSize, createIfMissing, errorIfExists);
+    db._open(shared, replyPort.sendPort, path, blockSize, createIfMissing, errorIfExists);
     return completer.future;
   }
 

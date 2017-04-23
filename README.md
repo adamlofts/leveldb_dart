@@ -58,6 +58,15 @@ Documentation
 
 API Documentation is available at https://www.dartdocs.org/documentation/leveldb/latest/
 
+Isolates (Threads)
+------------------
+
+leveldb_dart supports access to a database from multiple isolates by passing
+`shared: true` to the
+[LevelDB.open](https://www.dartdocs.org/documentation/leveldb/latest/leveldb/LevelDB/open.html) function. The `LevelDB` object
+returned by this function will share an underlying reference to the object in other isolates and changes will
+be visible between isolates.
+
 Feature Support
 ---------------
 - [x] Read and write keys

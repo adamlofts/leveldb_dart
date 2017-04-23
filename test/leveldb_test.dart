@@ -7,12 +7,12 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 import 'package:leveldb/leveldb.dart';
 
-Future<LevelDB> _openTestDB({int index: 0}) async {
+Future<LevelDB> _openTestDB({int index: 0, bool shared: false}) async {
   Directory d = new Directory('/tmp/test-level-db-dart-$index');
   if (d.existsSync()) {
     await d.delete(recursive: true);
   }
-  return (await LevelDB.open('/tmp/test-level-db-dart-$index'));
+  return (await LevelDB.open('/tmp/test-level-db-dart-$index', shared: shared));
 }
 
 const Matcher _isClosedError = const _ClosedMatcher();
@@ -333,6 +333,40 @@ void main() {
       expect(it.currentValue, null);
     }
     db.close();
+  });
+
+
+  test('Shared db in same isolate', () async {
+    LevelDB db = await _openTestDB(shared: true);
+    LevelDB db1 = await _openTestDB(shared: true);
+
+    db.put("k1", "v");
+    expect(db1.get("k1"), "v");
+
+    // Close the 1st reference. It cannot be used now.
+    db.close();
+    expect(() => db.get("SOME KEY"), throwsA(_isClosedError));
+
+    // db1 Should still work.
+    db1.put("k1", "v2");
+    expect(db1.get("k1"), "v2");
+
+    // close the 2nd reference. It cannot be used.
+    db1.close();
+    expect(() => db1.get("SOME KEY"), throwsA(_isClosedError));
+  });
+
+
+  test('Shared db removed from map', () async {
+    // Test that a shared db is correctly removed from the shared map when closed.
+    LevelDB db = await _openTestDB(shared: true);
+    db.close();
+
+    // Since the db is closed above it will be remove from the shared map and therefore
+    // this will open a new db and we are allowed to read/write keys.
+    LevelDB db1 = await _openTestDB(shared: true);
+    db1.put("k1", "v");
+    expect(db1.get("k1"), "v");
   });
 
 }

@@ -4,7 +4,10 @@
 #include <stdio.h>
 
 #include <list>
+#include <deque>
 #include <string>
+#include <map>
+#include <cstring>
 
 #include "include/dart_api.h"
 #include "include/dart_native_api.h"
@@ -36,24 +39,175 @@ DART_EXPORT Dart_Handle leveldb_Init(Dart_Handle parent_library) {
 }
 
 
-struct NativeIterator;
+int64_t statusToError(leveldb::Status status) {
+    if (status.IsNotFound()) {
+        return -5;
+    }
+    if (status.IsIOError()) {
+        return -2;
+    }
+    if (status.IsCorruption()) {
+        return -3;
+    }
+    // LevelDB does not provide Status::IsInvalidArgument so we just assume all other errors are invalid argument.
+    if (!status.ok()) {
+        return -4;
+    }
+    return 0;
+}
 
 
-struct NativeDB {
+struct DB {
   leveldb::DB *db;
+  int64_t refcount;
 
+  bool is_shared;
   char* path;
   int64_t block_size;
   bool create_if_missing;
   bool error_if_exists;
 
-  Dart_Port open_port_id;
   pthread_t thread;
+  std::deque<Dart_Port> notify_list;
+  int64_t open_status;
+  pthread_mutex_t mutex;
+};
 
-  bool is_closed;
-  bool is_finalized;
 
-  std::list<NativeIterator*> *iterators;
+struct cmp_str {
+   bool operator()(char const *a, char const *b) {
+      return std::strcmp(a, b) < 0;
+   }
+};
+
+
+typedef std::map<char const*, DB*, cmp_str> DBMap;
+pthread_mutex_t shared_mutex = PTHREAD_MUTEX_INITIALIZER;
+DBMap sharedDBs;
+
+
+void* runOpen(void* ptr) {
+    DB *native_db = (DB*) ptr;
+    leveldb::Options options;
+    options.create_if_missing = native_db->create_if_missing;
+    options.error_if_exists = native_db->error_if_exists;
+    options.block_size = native_db->block_size;
+    options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
+
+    leveldb::Status status = leveldb::DB::Open(options, native_db->path, &native_db->db);
+
+    // Notify all ports the new status.
+    pthread_mutex_lock(&native_db->mutex);
+    native_db->open_status = statusToError(status);
+
+    while (!native_db->notify_list.empty()) {
+        Dart_Port port = native_db->notify_list.front();
+        native_db->notify_list.pop_front();
+        Dart_PostInteger(port, native_db->open_status);
+    }
+    pthread_mutex_unlock(&native_db->mutex);
+    return NULL;
+}
+
+/// Open a db and take a reference to it.
+/// open_port_id will be notified when the db is ready or an error occurs.
+DB* referenceDB(const char *path, bool is_shared, Dart_Port open_port_id, bool create_if_missing, bool error_if_exists, int64_t block_size) {
+    DB* db = NULL;
+    bool is_new = false;
+
+    pthread_mutex_lock(&shared_mutex);
+
+    // Look for the db by path
+    if (is_shared) {
+        DBMap::iterator it = sharedDBs.find(path);
+        if (it != sharedDBs.end()) {
+            db = it->second;
+            assert(db->refcount > 0);
+        }
+    }
+
+    // Create db if not found
+    if (db == NULL) {
+        is_new = true;
+        db = new DB();
+        db->is_shared = is_shared;
+        db->path = strdup(path);
+        db->refcount = 0;
+        db->open_status = 1;
+        db->create_if_missing = create_if_missing;
+        db->error_if_exists = error_if_exists;
+        db->block_size = block_size;
+        pthread_mutex_init(&db->mutex, NULL);
+    }
+
+    // If the db is shared add it to the map
+    if (is_shared) {
+        sharedDBs[db->path] = db;
+    }
+
+    // If the db is open then just post a reply now. Otherwise add the port to the notify list.
+    pthread_mutex_lock(&db->mutex);
+    db->refcount += 1;
+    if (db->open_status <= 0) {
+        // The open thread has finished.
+        Dart_PostInteger(open_port_id, db->open_status);
+    } else {
+        db->notify_list.push_back(open_port_id);
+    }
+    pthread_mutex_unlock(&db->mutex);
+
+    pthread_mutex_unlock(&shared_mutex);
+
+    // Spawn a thread to open the DB
+    if (is_new) {
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+        int rc = pthread_create(&db->thread, &attr, runOpen, (void*)db);
+        assert(rc == 0);
+        pthread_attr_destroy(&attr);
+    }
+    return db;
+}
+
+
+/// Drop a reference to a db.
+/// May result in the db being closed.
+void unreferenceDB(DB* db) {
+    // Wait for the open thread to be finished. This is so all dart ports are replied too.
+    pthread_join(db->thread, NULL);
+
+    bool is_finished;
+    // Take the shared mutex and the db mutex. This is so that if the refcount drops to 0 we can safely remove it
+    // from the shared map.
+    pthread_mutex_lock(&shared_mutex);
+    pthread_mutex_lock(&db->mutex);
+    db->refcount -= 1;
+    is_finished = db->refcount == 0;
+
+    // If the db is shared then remove it from the map.
+    if (is_finished && db->is_shared) {
+        sharedDBs.erase(db->path);
+    }
+
+    pthread_mutex_unlock(&db->mutex);
+    pthread_mutex_unlock(&shared_mutex);
+
+    if (is_finished) {
+        delete db->path;
+        delete db->db;
+        delete db;
+    }
+}
+
+
+struct NativeIterator;
+
+
+struct NativeDB {
+    // Reference to the DB. NULL if closed.
+    DB* db;
+    std::list<NativeIterator*> *iterators;
 };
 
 
@@ -83,7 +237,7 @@ struct NativeIterator {
  */
 static void iteratorFinalize(NativeIterator *it_ref) {
   if (it_ref->is_finalized) {
-    return; // FIXME: LOCKING?
+    return;
   }
   it_ref->is_finalized = true;
 
@@ -102,35 +256,25 @@ static void iteratorFinalize(NativeIterator *it_ref) {
 
 
 /**
- * Stop all iterators, close the db.
- * Thread safe.
- */
-static void finalizeDB(NativeDB *native_db) {
-  if (native_db->is_finalized) {  // FIXME: locking?
-    return;
-  }
-  native_db->is_finalized = true;
-
-  delete native_db->path;
-
-  // Finalize every iterator. The iterators remove themselves from the array.
-  while (!native_db->iterators->empty()) {
-    iteratorFinalize(native_db->iterators->front());
-  }
-  delete native_db->iterators;
-
-  // Close the db
-  delete native_db->db;
-}
-
-
-/**
  * Finalizer called when the dart LevelDB instance is not reachable.
  * */
 static void NativeDBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
-  NativeDB* native_db = (NativeDB*) peer;
-  finalizeDB(native_db);
-  delete native_db;
+    NativeDB* native_db = (NativeDB*) peer;
+
+    // If the db reference is not NULL then the user did not call close on the db before it went out of scope.
+    // We unreference it now.
+    if (native_db->db != NULL) {
+        unreferenceDB(native_db->db);
+        native_db->db = NULL;
+    }
+
+    // Finalize every iterator. The iterators remove themselves from the array.
+    while (!native_db->iterators->empty()) {
+        iteratorFinalize(native_db->iterators->front());
+    }
+    delete native_db->iterators;
+
+    delete native_db;
 }
 
 
@@ -152,87 +296,39 @@ static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersis
 }
 
 
-bool maybeSendError(Dart_Port port_id, leveldb::Status status) {
-  if (status.IsNotFound()) {
-    Dart_PostInteger(port_id, -5);
-    return true;
-  }
-  if (status.IsIOError()) {
-    Dart_PostInteger(port_id, -2);
-    return true;
-  }
-  if (status.IsCorruption()) {
-    Dart_PostInteger(port_id, -3);
-    return true;
-  }
-  // LevelDB does not provide Status::IsInvalidArgument so we just assume all other errors are invalid argument.
-  if (!status.ok()) {
-    Dart_PostInteger(port_id, -4);
-    return true;
-  }
-  return false;
-}
+void dbOpen(Dart_NativeArguments arguments) {  // (bool shared, SendPort port, String path, int blockSize, bool create_if_missing, bool error_if_exists)
+    Dart_EnterScope();
 
+    NativeDB* native_db = new NativeDB();
 
-void* runOpen(void* ptr) {
-  NativeDB *native_db = (NativeDB*) ptr;
-  leveldb::Options options;
-  options.create_if_missing = native_db->create_if_missing;
-  options.error_if_exists = native_db->error_if_exists;
-  options.block_size = native_db->block_size;
-  options.filter_policy = leveldb::NewBloomFilterPolicy(BLOOM_BITS_PER_KEY);
+    const char* path;
+    Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 3);
+    Dart_StringToCString(arg2, &path);
 
-  leveldb::Status status = leveldb::DB::Open(options, native_db->path, &native_db->db);
-  if (maybeSendError(native_db->open_port_id, status)) {
-    return NULL;
-  }
-  Dart_PostInteger(native_db->open_port_id, 0);
-  return NULL;
-}
+    Dart_Port port_id;
+    Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 2);
+    Dart_SendPortGetId(arg1, &port_id);
 
+    bool is_shared;
+    bool create_if_missing;
+    bool error_if_exists;
+    int64_t block_size;
 
-void dbOpen(Dart_NativeArguments arguments) {  // (SendPort port, String path, int blockSize, bool create_if_missing, bool error_if_exists)
-  Dart_EnterScope();
+    Dart_GetNativeBooleanArgument(arguments, 1, &is_shared);
+    Dart_GetNativeIntegerArgument(arguments, 4, &block_size);
+    Dart_GetNativeBooleanArgument(arguments, 5, &create_if_missing);
+    Dart_GetNativeBooleanArgument(arguments, 6, &error_if_exists);
 
-  NativeDB* native_db = new NativeDB();
+    native_db->db = referenceDB(path, is_shared, port_id, create_if_missing, error_if_exists, 1024);
+    native_db->iterators = new std::list<NativeIterator*>();
 
-  native_db->is_closed = false;
-  native_db->is_finalized = false;
-  native_db->iterators = new std::list<NativeIterator*>();
-  native_db->path = NULL;
+    Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+    Dart_SetNativeInstanceField(arg0, 0, (intptr_t) native_db);
 
-  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  Dart_SetNativeInstanceField(arg0, 0, (intptr_t) native_db);
+    Dart_NewWeakPersistentHandle(arg0, (void*) native_db, sizeof(NativeDB) /* external_allocation_size */, NativeDBFinalizer);
 
-  Dart_Port port_id;
-  Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
-  Dart_SendPortGetId(arg1, &port_id);
-
-  const char* path;
-  Dart_Handle arg2 = Dart_GetNativeArgument(arguments, 2);
-  Dart_StringToCString(arg2, &path);
-  native_db->path = strdup(path);
-
-  Dart_GetNativeIntegerArgument(arguments, 3, &native_db->block_size);
-  Dart_GetNativeBooleanArgument(arguments, 4, &native_db->create_if_missing);
-  Dart_GetNativeBooleanArgument(arguments, 5, &native_db->error_if_exists);
-
-  native_db->open_port_id = port_id;
-
-  // Start the db open thread
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-  int rc = pthread_create(&native_db->thread, &attr, runOpen, (void*)native_db);
-  assert(rc == 0);
-
-  pthread_attr_destroy(&attr);
-
-  Dart_NewWeakPersistentHandle(arg0, (void*) native_db, sizeof(NativeDB) /* external_allocation_size */, NativeDBFinalizer);
-
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_ExitScope();
+    Dart_SetReturnValue(arguments, Dart_Null());
+    Dart_ExitScope();
 }
 
 
@@ -271,7 +367,7 @@ void syncNew(Dart_NativeArguments arguments) {  // (this, db, limit, fillCache, 
   Dart_Handle arg1 = Dart_GetNativeArgument(arguments, 1);
   Dart_GetNativeInstanceField(arg1, 0, (intptr_t*) &native_db);
 
-  if (native_db->is_closed) {
+  if (native_db->db == NULL) {
     throwClosedException();
     assert(false); // Not reached
   }
@@ -352,7 +448,7 @@ void syncNext(Dart_NativeArguments arguments) {  // (this)
   NativeDB *native_db = native_iterator->native_db;
   leveldb::Iterator* it = native_iterator->iterator;
 
-  if (native_db->is_closed) {
+  if (native_db->db == NULL) {
     throwClosedException();
     assert(false); // Not reached
   }
@@ -361,7 +457,7 @@ void syncNext(Dart_NativeArguments arguments) {  // (this)
   if (!native_iterator->is_finalized && it == NULL) {
     leveldb::ReadOptions options;
     options.fill_cache = native_iterator->is_fill_cache;
-    it = native_db->db->NewIterator(options);
+    it = native_db->db->db->NewIterator(options);
 
     native_iterator->iterator = it;
     // Add the iterator to the db list. This is so we know to finalize it before finalizing the db.
@@ -449,7 +545,7 @@ void syncGet(Dart_NativeArguments arguments) {  // (this, key)
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
   Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
 
-  if (native_db->is_closed) {
+  if (native_db->db == NULL) {
     throwClosedException();
     assert(false); // Not reached
   }
@@ -465,7 +561,7 @@ void syncGet(Dart_NativeArguments arguments) {  // (this, key)
   leveldb::Slice key = leveldb::Slice(data, len);
 
   std::string value;
-  leveldb::Status status = native_db->db->Get(leveldb::ReadOptions(), key, &value);
+  leveldb::Status status = native_db->db->db->Get(leveldb::ReadOptions(), key, &value);
   Dart_TypedDataReleaseData(arg1);
 
   Dart_Handle result;
@@ -494,7 +590,7 @@ void syncPut(Dart_NativeArguments arguments) {  // (this, key, value, sync)
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
   Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
 
-  if (native_db->is_closed) {
+  if (native_db->db == NULL) {
     throwClosedException();
     assert(false); // Not reached
   }
@@ -522,7 +618,7 @@ void syncPut(Dart_NativeArguments arguments) {  // (this, key, value, sync)
   leveldb::WriteOptions options;
   options.sync = is_sync;
 
-  leveldb::Status status = native_db->db->Put(options, key, value);
+  leveldb::Status status = native_db->db->db->Put(options, key, value);
   
   Dart_TypedDataReleaseData(arg1);
   Dart_TypedDataReleaseData(arg2);
@@ -541,7 +637,7 @@ void syncDelete(Dart_NativeArguments arguments) {  // (this, key)
   Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
   Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
 
-  if (native_db->is_closed) {
+  if (native_db->db == NULL) {
     throwClosedException();
     assert(false); // Not reached
   }
@@ -555,7 +651,7 @@ void syncDelete(Dart_NativeArguments arguments) {  // (this, key)
   Dart_TypedDataAcquireData(arg1, &typed_data_type, (void**)&data, &len);
 
   leveldb::Slice key = leveldb::Slice(data, len);
-  leveldb::Status status = native_db->db->Delete(leveldb::WriteOptions(), key);
+  leveldb::Status status = native_db->db->db->Delete(leveldb::WriteOptions(), key);
   Dart_TypedDataReleaseData(arg1);
 
   maybeThrowStatus(status);
@@ -564,23 +660,30 @@ void syncDelete(Dart_NativeArguments arguments) {  // (this, key)
   Dart_ExitScope();
 }
 
+
 void syncClose(Dart_NativeArguments arguments) {  // (this)
-  Dart_EnterScope();
+    Dart_EnterScope();
 
-  NativeDB *native_db;
-  Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
-  Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
+    NativeDB *native_db;
+    Dart_Handle arg0 = Dart_GetNativeArgument(arguments, 0);
+    Dart_GetNativeInstanceField(arg0, 0, (intptr_t*) &native_db);
 
-  if (native_db->is_closed) {
-    throwClosedException();
-    assert(false); // Not reached
-  }
+    if (native_db->db == NULL) {
+        // DB has already been closed
+        throwClosedException();
+        assert(false); // Not reached
+    }
 
-  native_db->is_closed = true;
-  finalizeDB(native_db);
+    // Finalize all iterators
+    while (!native_db->iterators->empty()) {
+        iteratorFinalize(native_db->iterators->front());
+    }
 
-  Dart_SetReturnValue(arguments, Dart_Null());
-  Dart_ExitScope();
+    unreferenceDB(native_db->db);
+    native_db->db = NULL;
+
+    Dart_SetReturnValue(arguments, Dart_Null());
+    Dart_ExitScope();
 }
 
 
