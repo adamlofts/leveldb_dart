@@ -87,6 +87,7 @@ DBMap sharedDBs;
 
 
 void* runOpen(void* ptr) {
+    // This function may not take the shared mutex because we take it when joining to this thread.
     DB *native_db = (DB*) ptr;
     leveldb::Options options;
     options.create_if_missing = native_db->create_if_missing;
@@ -155,7 +156,6 @@ DB* referenceDB(const char *path, bool is_shared, Dart_Port open_port_id, bool c
         db->notify_list.push_back(open_port_id);
     }
     pthread_mutex_unlock(&db->mutex);
-
     pthread_mutex_unlock(&shared_mutex);
 
     // Spawn a thread to open the DB
@@ -174,9 +174,6 @@ DB* referenceDB(const char *path, bool is_shared, Dart_Port open_port_id, bool c
 /// Drop a reference to a db.
 /// May result in the db being closed.
 void unreferenceDB(DB* db) {
-    // Wait for the open thread to be finished. This is so all dart ports are replied too.
-    pthread_join(db->thread, NULL);
-
     bool is_finished;
     // Take the shared mutex and the db mutex. This is so that if the refcount drops to 0 we can safely remove it
     // from the shared map.
@@ -191,13 +188,22 @@ void unreferenceDB(DB* db) {
     }
 
     pthread_mutex_unlock(&db->mutex);
-    pthread_mutex_unlock(&shared_mutex);
 
     if (is_finished) {
+        // It is possible that unreferenceDB is called before db->thread is initialized if a 2nd thread quickly takes a reference to a
+        // shared db and then drops it. However the initializing thread still has a reference so it is safe to call pthread_join()
+        // if the refcount was 0
+        pthread_join(db->thread, NULL);
+
+        // The actual closing of the db and its file descriptors must be run whilst
+        // the shared lock is taken so that any threads attempting to open the same file will
+        // succeed.
         delete db->path;
         delete db->db;
         delete db;
     }
+
+    pthread_mutex_unlock(&shared_mutex);
 }
 
 

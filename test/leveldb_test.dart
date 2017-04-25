@@ -35,6 +35,9 @@ class _InvalidArgumentMatcher extends TypeMatcher {
   bool matches(dynamic item, Map<dynamic, dynamic> matchState) => item is LevelInvalidArgumentError;
 }
 
+/// Set this tag to skip running on travis.
+const List<String> _skipTravis = const <String>["skip-travis"];
+
 /// tests
 void main() {
   test('LevelDB basics', () async {
@@ -393,24 +396,34 @@ void main() {
   });
 
   test('Shared db isolates test', () async {
+    // Spawn 2 isolates of which open and close the same shared db a lot in an attempt to find race conditions
+    // in opening and closing the db.
     Future<Null> run(int index) {
       Completer<Null> completer = new Completer<Null>();
-      RawReceivePort exitPort = new RawReceivePort((_) => completer.complete());
-      Isolate.spawn(_isolateTest, index, onExit: exitPort.sendPort);
+      RawReceivePort exitPort = new RawReceivePort((_) {
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      });
+      RawReceivePort errorPort = new RawReceivePort((dynamic v) => completer.completeError(v));
+      Isolate.spawn(_isolateTest, index, onExit: exitPort.sendPort, onError: errorPort.sendPort);
       return completer.future;
     }
 
-    await Future.wait(new Iterable<int>.generate(50).map(run));
+    await Future.wait(new Iterable<int>.generate(2).map(run), eagerError: true);
   });
 }
 
 // Must be a top-level because this function runs in another isolate.
 Future<Null> _isolateTest(int v) async {
-  LevelDB<String, String> db = await _openTestDB(shared: true);
-  db.put("key-$v", "$v");
-  // Allocate an iterator.
-  for (LevelItem<String, String> _ in db.getItems(limit: 2)) {
-    // pass
+  for (int _ in new Iterable<int>.generate(1000)) {
+    LevelDB<String, String> db = await _openTestDB(shared: true, clean: false);
+    // Allocate an iterator.
+    for (LevelItem<String, String> _ in db.getItems(limit: 2)) {
+      // pass
+    }
+    db.close();
+
+    await new Future<Null>.delayed(new Duration(milliseconds: 2));
   }
-  db.close();
 }

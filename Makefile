@@ -19,7 +19,9 @@ DART_SDK=/home/adam/dev/tools/dart-sdk
 all: lib/libleveldb.so
 
 LIBS=$(LEVELDB_SOURCE)/out-static/libleveldb.a
+# Select prod/debug args
 ARGS=-O2 -Wall -D_GLIBCXX_USE_CXX11_ABI=0
+# ARGS=-g -O0 -Wall -D_GLIBCXX_USE_CXX11_ABI=0
 
 lib/leveldb.o: lib/leveldb.cc
 	g++ $(ARGS) -fPIC -I$(DART_SDK) -I$(LEVELDB_SOURCE)/include -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o
