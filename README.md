@@ -45,7 +45,7 @@ import 'dart:async';
 import 'package:leveldb/leveldb.dart';
 
 Future main() async {
-  LevelDB db = await LevelDB.open("/tmp/testdb1");
+  LevelDB<String, String> db = await LevelDB.openUtf8("/tmp/testdb");
   db.put("abc", "def");
   String value = db.get("abc");
   print("value is $value"); // value2 is def
