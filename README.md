@@ -14,7 +14,7 @@ operations, *batched put and delete*, bi-directional iterators and simple compre
 
 **leveldb_dart** aims to expose the features of LevelDB in a **Dart-friendly way**.
 
-LevelDB stores entries **sorted lexicographically by keys**. This makes leveldb's `getItems` interface a very powerful query mechanism.
+LevelDB stores entries **sorted lexicographically by keys**. This makes [LevelDB.getItems](https://www.dartdocs.org/documentation/leveldb/latest/leveldb/LevelDB/getItems.html) a very powerful query mechanism.
 
 Platform Support
 ----------------
@@ -61,16 +61,20 @@ API Documentation is available at https://www.dartdocs.org/documentation/leveldb
 Isolates (Threads)
 ------------------
 
-leveldb_dart supports access to a database from multiple isolates by passing
+*leveldb_dart* supports access to a database from multiple isolates by passing
 `shared: true` to the
 [LevelDB.open](https://www.dartdocs.org/documentation/leveldb/latest/leveldb/LevelDB/open.html) function. The `LevelDB` object
 returned by this function will share an underlying reference to the object in other isolates and changes will
 be visible between isolates.
 
+See [example/isolate.dart](example/isolate.dart) for an example of using a database from multiple isolates (OS threads).
+
+
 Feature Support
 ---------------
 - [x] Read and write keys
 - [x] Forward iteration
+- [x] Multi-isolate
 - [ ] Backward iteration
 - [ ] Snapshots
 - [ ] Bulk get / put
