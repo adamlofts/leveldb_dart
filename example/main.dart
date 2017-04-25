@@ -1,5 +1,6 @@
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:leveldb/leveldb.dart';
 
@@ -8,7 +9,7 @@ Future<dynamic> main() async {
 
   // Open a database. It is created if it does not already exist. Only one process can
   // open a database at a time.
-  LevelDB db = await LevelDB.open("/tmp/testdb");
+  LevelDB<String, String> db = await LevelDB.openUtf8("/tmp/testdb");
 
   // By default keys and values are strings.
   db.put("abc", "def");
@@ -30,17 +31,17 @@ Future<dynamic> main() async {
   }
 
   // Iterate through the key-value pairs in key order.
-  for (LevelItem v in db.getItems()) {
+  for (LevelItem<String, String> v in db.getItems()) {
     print("Row: ${v.key} ${v.value}");  // prints Row: key-0 value-0, Row: key-1 value-1, ...
   }
 
   // Iterate keys between key-1 and key-3
-  for (LevelItem v in db.getItems(gte: "key-1", lte: "key-3")) {
+  for (LevelItem<String, String> v in db.getItems(gte: "key-1", lte: "key-3")) {
     print("Row: ${v.key} ${v.value}");  // prints Row: key-1 value-1, Row: key-2 value-2, Row: key-3 value-3
   }
 
   // Iterate explicitly. This avoids allocation of LevelItem objects if you never call it.current.
-  LevelIterator it = db.getItems(limit: 1).iterator;
+  LevelIterator<String, String> it = db.getItems(limit: 1).iterator;
   while (it.moveNext()) {
     print("${it.currentKey} ${it.currentValue}");
   }
@@ -55,12 +56,16 @@ Future<dynamic> main() async {
     print("Value $value"); // Prints Key value-0, Key value-1, ...
   }
 
-  // Get the raw UInt8List data. This is faster since it avoids any decoding.
-  for (LevelItem item in db.getItems(keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none)) {
-    print("${item.key}"); // Prints [107, 101, 121, 45, 48], ...
-  }
-
   // Close the db. This free's all resources associated with the db.
   // All iterators will throw if used after this call.
   db.close();
+
+  // Open a new db which will use raw UInt8List data. This is faster since it avoids any decoding.
+  LevelDB<Uint8List, Uint8List> db2 = await LevelDB.openUint8List("/tmp/testdb");
+
+  for (LevelItem<Uint8List, Uint8List> item in db2.getItems()) {
+    print("${item.key}"); // Prints [107, 101, 121, 45, 48], ...
+  }
+
+  db2.close();
 }

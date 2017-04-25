@@ -2,17 +2,21 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:leveldb/leveldb.dart';
 
-Future<LevelDB> _openTestDB({int index: 0, bool shared: false}) async {
+Future<LevelDB<K, V>> _openTestDB<K, V>(
+    {int index: 0, bool shared: false, bool clean: true,
+    LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding}) async {
   Directory d = new Directory('/tmp/test-level-db-dart-$index');
-  if (d.existsSync()) {
+  if (clean && d.existsSync()) {
     await d.delete(recursive: true);
   }
-  return (await LevelDB.open('/tmp/test-level-db-dart-$index', shared: shared));
+  return (await LevelDB.open<K, V>('/tmp/test-level-db-dart-$index', shared: shared,
+    keyEncoding: keyEncoding, valueEncoding: valueEncoding));
 }
 
 const Matcher _isClosedError = const _ClosedMatcher();
@@ -33,8 +37,8 @@ class _InvalidArgumentMatcher extends TypeMatcher {
 
 /// tests
 void main() {
-  test('LevelDB', () async {
-    LevelDB db = await _openTestDB();
+  test('LevelDB basics', () async {
+    LevelDB<String, String> db = await _openTestDB();
 
     db.put("k1", "v");
     db.put("k2", "v");
@@ -82,34 +86,41 @@ void main() {
     keys = db.getItems(gte: "k1", lte: "k2").keys.toList();
     expect(keys.length, equals(2));
 
+    db.close();
+
+    LevelDB<Uint8List, Uint8List> db2 = await _openTestDB<Uint8List, Uint8List>(
+        keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none,
+        clean: false
+    );
+
     // Test with LevelEncodingNone
     Uint8List key = new Uint8List(2);
     key[0] = "k".codeUnitAt(0);
     key[1] = "1".codeUnitAt(0);
-    keys = db.getItems(gt: key, keyEncoding: LevelEncoding.none).keys.toList();
+    keys = db2.getItems(gt: key).keys.toList();
     expect(keys.length, equals(1));
 
-    keys = db.getItems(gte: key, keyEncoding: LevelEncoding.none).keys.toList();
+    keys = db2.getItems(gte: key).keys.toList();
     expect(keys.length, equals(2));
 
     key[1] = "2".codeUnitAt(0);
-    keys = db.getItems(gt: key, keyEncoding: LevelEncoding.none).keys.toList();
+    keys = db2.getItems(gt: key).keys.toList();
     expect(keys.length, equals(0));
 
-    keys = db.getItems(gte: key, keyEncoding: LevelEncoding.none).keys.toList();
+    keys = db2.getItems(gte: key).keys.toList();
     expect(keys.length, equals(1));
 
-    keys = db.getItems(lt: key, keyEncoding: LevelEncoding.none).keys.toList();
+    keys = db2.getItems(lt: key).keys.toList();
     expect(keys.length, equals(1));
 
-    keys = db.getItems(lt: key, keyEncoding: LevelEncoding.none).values.toList();
+    keys = db2.getItems(lt: key).values.toList();
     expect(keys.length, equals(1));
 
-    db.close();
+    db2.close();
   });
 
   test('LevelDB delete', () async {
-    LevelDB db = await _openTestDB();
+    LevelDB<String, String> db = await _openTestDB();
     try {
       db.put("k1", "v");
       db.put("k2", "v");
@@ -124,12 +135,12 @@ void main() {
   });
 
   test('TWO DBS', () async {
-    LevelDB db1 = await _openTestDB();
-    LevelDB db2 = await _openTestDB(index: 1);
+    LevelDB<String, String> db1 = await _openTestDB();
+    LevelDB<String, String> db2 = await _openTestDB(index: 1);
 
     db1.put("a", "1");
 
-    String v = await db2.get("a");
+    String v = db2.get("a");
     expect(v, equals(null));
 
     db1.close();
@@ -137,7 +148,7 @@ void main() {
   });
 
   test('Usage after close()', () async {
-    LevelDB db1 = await _openTestDB();
+    LevelDB<String, String> db1 = await _openTestDB();
     db1.close();
 
     expect(() => db1.get("SOME KEY"), throwsA(_isClosedError));
@@ -146,7 +157,7 @@ void main() {
     expect(() => db1.close(), throwsA(_isClosedError));
 
     try {
-      for (LevelItem _ in db1.getItems()) {
+      for (LevelItem<String, String> _ in db1.getItems()) {
         expect(true, equals(false)); // Should not happen.
       }
     } on LevelClosedError {
@@ -155,7 +166,7 @@ void main() {
   });
 
   test('DB locking throws IOError', () async {
-    LevelDB db1 = await _openTestDB();
+    LevelDB<String, String> db1 = await _openTestDB();
     try {
       await _openTestDB();
       expect(true, equals(false)); // Should not happen. The db is locked.
@@ -167,13 +178,13 @@ void main() {
   });
 
   test('Exception inside iteration', () async {
-    LevelDB db1 = await _openTestDB();
+    LevelDB<String, String> db1 = await _openTestDB();
     db1.put("a", "1");
     db1.put("b", "1");
     db1.put("c", "1");
 
     try {
-      for (LevelItem _ in db1.getItems()) {
+      for (LevelItem<String, String> _ in db1.getItems()) {
         throw new Exception("OH NO");
       }
     } catch (e) {
@@ -184,34 +195,50 @@ void main() {
   });
 
   test('Test with None encoding', () async {
-    LevelDB db1 = await _openTestDB();
+    LevelDB<Uint8List, Uint8List> dbNone = await _openTestDB(
+        keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none,
+        shared: true
+    );
+    LevelDB<String, String> dbAscii = await _openTestDB(
+        keyEncoding: LevelEncoding.ascii, valueEncoding: LevelEncoding.ascii,
+        shared: true, clean: false
+    );
+    LevelDB<String, String> dbUtf8 = await _openTestDB(
+        keyEncoding: LevelEncoding.utf8, valueEncoding: LevelEncoding.utf8,
+        shared: true, clean: false
+    );
     Uint8List v = new Uint8List.fromList(UTF8.encode("key1"));
+    dbNone.put(v, v);
 
-    db1.put(v, v, keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none);
-
-    String s = await db1.get("key1");
+    String s = dbUtf8.get("key1");
     expect(s, equals("key1"));
 
-    String s2 = await db1.get("key1", keyEncoding: LevelEncoding.ascii);
+    String s2 = dbAscii.get("key1");
     expect(s2, equals("key1"));
 
-    Uint8List v2 = await db1.get(v, keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none);
+    Uint8List v2 = dbNone.get(v);
     expect(v2, equals(v));
 
-    db1.delete(v, keyEncoding: LevelEncoding.none);
+    dbNone.delete(v);
+    expect(dbNone.get(v), null);
+    dbNone.close();
 
-    db1.close();
+    expect(dbAscii.get("key1"), null);
+    dbAscii.close();
+
+    expect(dbUtf8.get("key1"), null);
+    dbUtf8.close();
   });
 
   test('Close inside iteration', () async {
-    LevelDB db1 = await _openTestDB();
+    LevelDB<String, String> db1 = await _openTestDB();
     db1.put("a", "1");
     db1.put("b", "1");
 
     bool isClosedSeen = false;
 
     try {
-      for (LevelItem _ in db1.getItems()) {
+      for (LevelItem<String, String> _ in db1.getItems()) {
         db1.close();
       }
     } on LevelClosedError catch (_) {
@@ -226,28 +253,24 @@ void main() {
   });
 
   test('Test error if exists', () async {
-
-    LevelDB db = await LevelDB.open('/tmp/test-level-db-dart-exists');
+    LevelDB<String, String> db = await LevelDB.open('/tmp/test-level-db-dart-exists');
     db.close();
     expect(LevelDB.open('/tmp/test-level-db-dart-exists', errorIfExists: true), throwsA(_isInvalidArgumentError));
   });
 
   test('LevelDB sync iterator', () async {
-    LevelDB db = await _openTestDB();
+    LevelDB<String, String> db = await _openTestDB();
 
     db.put("k1", "v");
     db.put("k2", "v");
 
     // All keys
-    List<LevelItem> items = db.getItems().toList();
-    expect(items.length, equals(2));
-    expect(items.map((LevelItem i) => i.key).toList(), equals(<String>["k1", "k2"]));
-    expect(items.map((LevelItem i) => i.value).toList(), equals(<String>["v", "v"]));
+    List<LevelItem<String, String>> items1 = db.getItems().toList();
+    expect(items1.length, equals(2));
+    expect(items1.map((LevelItem<String, String> i) => i.key).toList(), equals(<String>["k1", "k2"]));
+    expect(items1.map((LevelItem<String, String> i) => i.value).toList(), equals(<String>["v", "v"]));
 
-    items = db.getItems(keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none).toList();
-    expect(items.first.key, <int>[107, 49]);
-
-    items = db.getItems(gte: "k1").toList();
+    List<LevelItem<String, String>> items = db.getItems(gte: "k1").toList();
     expect(items.length, equals(2));
     items = db.getItems(gt: "k1").toList();
     expect(items.length, equals(1));
@@ -282,7 +305,7 @@ void main() {
 
     String val = "bv-12345678901234567890123456789012345678901234567890123456789012345678901234567890";
     db.put("a", val);
-    LevelItem item = db.getItems(lte: "a").first;
+    LevelItem<String, String> item = db.getItems(lte: "a").first;
     expect(item.value.length, val.length);
 
     String longKey = "";
@@ -297,13 +320,13 @@ void main() {
   });
 
   test('LevelDB sync iterator use after close', () async {
-    LevelDB db = await _openTestDB();
+    LevelDB<String, String> db = await _openTestDB();
 
     db.put("k1", "v");
     db.put("k2", "v");
 
     // All keys
-    Iterator<LevelItem> it = db.getItems().iterator;
+    Iterator<LevelItem<String, String>> it = db.getItems().iterator;
     it.moveNext();
 
     db.close();
@@ -312,10 +335,10 @@ void main() {
   });
 
   test('LevelDB sync iterator current == null', () async {
-    LevelDB db = await _openTestDB();
+    LevelDB<String, String> db = await _openTestDB();
 
     db.put("k1", "v");
-    LevelIterator it = db.getItems().iterator;
+    LevelIterator<String, String> it = db.getItems().iterator;
     expect(it.current, null);
     expect(it.currentKey, null);
     expect(it.currentValue, null);
@@ -337,8 +360,8 @@ void main() {
 
 
   test('Shared db in same isolate', () async {
-    LevelDB db = await _openTestDB(shared: true);
-    LevelDB db1 = await _openTestDB(shared: true);
+    LevelDB<String, String> db = await _openTestDB(shared: true);
+    LevelDB<String, String> db1 = await _openTestDB(shared: true);
 
     db.put("k1", "v");
     expect(db1.get("k1"), "v");
@@ -359,14 +382,35 @@ void main() {
 
   test('Shared db removed from map', () async {
     // Test that a shared db is correctly removed from the shared map when closed.
-    LevelDB db = await _openTestDB(shared: true);
+    LevelDB<String, String> db = await _openTestDB(shared: true);
     db.close();
 
     // Since the db is closed above it will be remove from the shared map and therefore
     // this will open a new db and we are allowed to read/write keys.
-    LevelDB db1 = await _openTestDB(shared: true);
+    LevelDB<String, String> db1 = await _openTestDB(shared: true);
     db1.put("k1", "v");
     expect(db1.get("k1"), "v");
   });
 
+  test('Shared db isolates test', () async {
+    Future<Null> run(int index) {
+      Completer<Null> completer = new Completer<Null>();
+      RawReceivePort exitPort = new RawReceivePort((_) => completer.complete());
+      Isolate.spawn(_isolateTest, index, onExit: exitPort.sendPort);
+      return completer.future;
+    }
+
+    await Future.wait(new Iterable<int>.generate(50).map(run));
+  });
+}
+
+// Must be a top-level because this function runs in another isolate.
+Future<Null> _isolateTest(int v) async {
+  LevelDB<String, String> db = await _openTestDB(shared: true);
+  db.put("key-$v", "$v");
+  // Allocate an iterator.
+  for (LevelItem<String, String> _ in db.getItems(limit: 2)) {
+    // pass
+  }
+  db.close();
 }

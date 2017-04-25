@@ -2,12 +2,12 @@
 
 library leveldb;
 
-import 'dart:async';
-import 'dart:isolate';
-import 'dart:typed_data';
-import 'dart:convert';
-import 'dart:nativewrappers';
-import 'dart:collection';
+import 'dart:async' show Future, Completer;
+import 'dart:isolate' show RawReceivePort, SendPort;
+import 'dart:typed_data' show Uint8List;
+import 'dart:convert' show UTF8, AsciiCodec;
+import 'dart:nativewrappers' show NativeFieldWrapperClass2;
+import 'dart:collection' show IterableBase;
 
 import 'dart-ext:leveldb';
 
@@ -39,76 +39,59 @@ class LevelInvalidArgumentError extends LevelError {
   const LevelInvalidArgumentError._internal() : super._internal("Invalid argument");
 }
 
-/// Interface for specifying an encoding. The encoding must encode the object ot a Uint8List and decode
+/// Interface for specifying an encoding. The encoding must encode the object to a Uint8List and decode
 /// from a Uint8List.
-abstract class LevelEncoding {
+abstract class LevelEncoding<T> {
   /// Encode to a Uint8List
-  Uint8List encode(dynamic v);
+  Uint8List encode(T v);
   /// Decode from a Uint8List
-  dynamic decode(Uint8List v);
+  T decode(Uint8List v);
 
   /// The none encoding does no encoding. You must pass in a Uint8List to all fucntions.
   /// Because it does no transformation it reduces the number of allocations.
   /// Use this encoding for performance.
-  static LevelEncoding get none => const _LevelEncodingNone();
+  static LevelEncoding<Uint8List> get none => const _LevelEncodingNone();
 
   /// Default encoding. Expects to be passed a String and will encode/decode to UTF8 in the db.
-  static LevelEncoding get utf8 => const _LevelEncodingUtf8();
+  static LevelEncoding<String> get utf8 => const _LevelEncodingUtf8();
 
   /// Ascii encoding. Potentially faster than UTF8 for ascii-only text (untested).
-  static LevelEncoding get ascii => const _LevelEncodingAscii();
-
-  static Uint8List _encodeValue(dynamic v, LevelEncoding encoding) {
-    if (encoding == const _LevelEncodingNone()) {
-      return v;
-    }
-    if (encoding == null) { // Default to utf8
-      return const _LevelEncodingUtf8().encode(v);
-    }
-    return encoding.encode(v);
-  }
-
-  static dynamic _decodeValue(dynamic v, LevelEncoding encoding) {
-    if (encoding == const _LevelEncodingNone()) {
-      return v;
-    }
-    if (encoding == null) { // Default to utf8
-      return const _LevelEncodingUtf8().decode(v);
-    }
-    return encoding.decode(v);
-  }
+  static LevelEncoding<String> get ascii => const _LevelEncodingAscii();
 }
 
-class _LevelEncodingUtf8 implements LevelEncoding {
+class _LevelEncodingUtf8 implements LevelEncoding<String> {
   /// Default UTF8 encoding.
   const _LevelEncodingUtf8();
   @override
-  Uint8List encode(dynamic v) => new Uint8List.fromList(UTF8.encode(v));
+  Uint8List encode(String v) => new Uint8List.fromList(UTF8.encode(v));
   @override
   String decode(Uint8List v) => UTF8.decode(v);
 }
 
-class _LevelEncodingAscii implements LevelEncoding {
+class _LevelEncodingAscii implements LevelEncoding<String> {
   // Ascii encoding
   const _LevelEncodingAscii();
   @override
-  Uint8List encode(dynamic v) => new Uint8List.fromList(const AsciiCodec().encode(v));
+  Uint8List encode(String v) => new Uint8List.fromList(const AsciiCodec().encode(v));
   @override
   String decode(Uint8List v) => const AsciiCodec().decode(v);
 }
 
-class _LevelEncodingNone implements LevelEncoding {
+class _LevelEncodingNone implements LevelEncoding<Uint8List> {
   const _LevelEncodingNone();
   @override
-  Uint8List encode(dynamic v) => throw new AssertionError();  // Never called
+  Uint8List encode(Uint8List v) => v;
   @override
-  Uint8List decode(Uint8List v) => throw new AssertionError();  // Never called
+  Uint8List decode(Uint8List v) => v;
 }
 
 /// A key-value database
-class LevelDB extends NativeFieldWrapperClass2 {
+class LevelDB<K, V> extends NativeFieldWrapperClass2 {
 
-  LevelDB._internal();
+  final LevelEncoding<K> _keyEncoding;
+  final LevelEncoding<V> _valueEncoding;
+
+  LevelDB._internal(this._keyEncoding, this._valueEncoding);
 
   void _open(bool shared, SendPort port, String path, int blockSize, bool createIfMissing, bool errorIfExists) native "DB_Open";
 
@@ -142,16 +125,42 @@ class LevelDB extends NativeFieldWrapperClass2 {
     return false;
   }
 
+  /// Open a database at [path] using [String] keys and values which will be encoded to utf8
+  /// in the database.
+  ///
+  /// See [open] for information on optional parameters.
+  static Future<LevelDB<String, String>> openUtf8(String path,
+      {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) =>
+      // Default encoding is utf8 so no need to specify.
+      open<String, String>(path,
+          shared: shared, blockSize: blockSize, createIfMissing: createIfMissing, errorIfExists: errorIfExists);
+
+  /// Open a database at [path] using raw [Uint8List] keys and values.
+  ///
+  /// See [open] for information on optional parameters.
+  static Future<LevelDB<Uint8List, Uint8List>> openUint8List(String path,
+      {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) =>
+    open<Uint8List, Uint8List>(path,
+        keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none,
+        shared: shared, blockSize: blockSize, createIfMissing: createIfMissing, errorIfExists: errorIfExists);
+
   /// Open a database at [path]
   ///
   /// If [shared] is true the database will be shared to other isolates in the dart vm. The [LevelDB] returned
   /// in another isolate calling [open] with the same [path] will share the underlying database and data changes
   /// will be visible to both.
-  static Future<LevelDB> open(String path, {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) {
-    Completer<LevelDB> completer = new Completer<LevelDB>();
+  ///
+  /// If [keyEncoding] or [valueEncoding] is specified then the given encoding will
+  /// be used to encoding and decode keys or values respectively. The encodings must match the generic
+  /// type of the database. The default encoding is [LevelEncoding.utf8] resulting in a `LevelDB<String, String>`.
+  static Future<LevelDB<K, V>> open<K, V>(String path,
+      {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false,
+      LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding}) {
+    Completer<LevelDB<K, V>> completer = new Completer<LevelDB<K, V>>();
     RawReceivePort replyPort = new RawReceivePort();
 
-    LevelDB db = new LevelDB._internal();
+    LevelDB<K, V> db = new LevelDB<K, V>._internal(
+        keyEncoding ?? LevelEncoding.utf8, valueEncoding ?? LevelEncoding.utf8);
     replyPort.handler = (dynamic result) {
       replyPort.close();
       if (_completeError(completer, result)) {
@@ -170,75 +179,76 @@ class LevelDB extends NativeFieldWrapperClass2 {
   }
 
   /// Get a key in the database. Returns null if the key is not found.
-  dynamic get(dynamic key, { LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
-    Uint8List keyEnc = LevelEncoding._encodeValue(key, keyEncoding);
+  V get(K key) {
+    Uint8List keyEnc = _keyEncoding.encode(key);
     Uint8List value = _syncGet(keyEnc);
-    Object ret;
+    V ret;
     if (value != null) {
-      ret = LevelEncoding._decodeValue(value, valueEncoding);
+      ret = _valueEncoding.decode(value);
     }
     return ret;
   }
 
   /// Set a key to a value.
-  void put(dynamic key, dynamic value, { bool sync: false, LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
-    Uint8List keyEnc = LevelEncoding._encodeValue(key, keyEncoding);
-    Uint8List valueEnc = LevelEncoding._encodeValue(value, valueEncoding);
+  void put(K key, V value, { bool sync: false }) {
+    Uint8List keyEnc = _keyEncoding.encode(key);
+    Uint8List valueEnc = _valueEncoding.encode(value);
     _syncPut(keyEnc, valueEnc, sync);
   }
 
   /// Remove a key from the database
-  void delete(dynamic key, { LevelEncoding keyEncoding }) {
-    Uint8List keyEnc = LevelEncoding._encodeValue(key, keyEncoding);
+  void delete(K key) {
+    Uint8List keyEnc = _keyEncoding.encode(key);
     _syncDelete(keyEnc);
   }
 
   /// Return an iterable which will iterate through the db in key order returning key-value items. This iterable
   /// is synchronous so will block when moving.
-  LevelIterable getItems({ dynamic gt, dynamic gte, dynamic lt, dynamic lte, int limit: -1, bool fillCache: true,
-      LevelEncoding keyEncoding, LevelEncoding valueEncoding }) {
-    return new LevelIterable._internal(this,
+  LevelIterable<K, V> getItems({ K gt, K gte, K lt, K lte, int limit: -1, bool fillCache: true }) {
+    return new LevelIterable<K, V>._internal(this,
         limit,
         fillCache,
         gt == null ? gte : gt,
         gt == null,
         lt == null ? lte : lt,
-        lt == null,
-        keyEncoding,
-        valueEncoding);
+        lt == null
+    );
   }
 }
 
 /// A key-value pair returned by the iterator
-class LevelItem {
+class LevelItem<K, V> {
   /// The key. Type is determined by the keyEncoding specified
-  final dynamic key;
+  final K key;
   /// The value. Type is determined by the valueEncoding specified
-  final dynamic value;
+  final V value;
   LevelItem._internal(this.key, this.value);
 }
 
 /// An iterator
-class LevelIterator extends NativeFieldWrapperClass2 implements Iterator<LevelItem> {
-  final LevelIterable _iterable;
+class LevelIterator<K, V> extends NativeFieldWrapperClass2 implements Iterator<LevelItem<K, V>> {
+  final LevelEncoding<K> _keyEncoding;
+  final LevelEncoding<V> _valueEncoding;
 
-  LevelIterator._internal(LevelIterable it) :
-      _iterable = it;
+  LevelIterator._internal(LevelIterable<K, V> it) :
+      _keyEncoding = it._db._keyEncoding,
+      _valueEncoding = it._db._valueEncoding;
 
-  int _init(LevelDB db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
-  List<dynamic> _next() native "SyncIterator_Next";
+  int _init(LevelDB<K, V> db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
+  Uint8List _next() native "SyncIterator_Next";
   Uint8List _current;
 
   /// The key of the current LevelItem
-  dynamic get currentKey =>
-      _current == null ? null : LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4, (_current[1] << 8) + _current[0]), _iterable._keyEncoding);
+  K get currentKey =>
+      _current == null ? null : _keyEncoding.decode(new Uint8List.view(_current.buffer, 4, (_current[1] << 8) + _current[0]));
+
   /// The value of the current LevelItem
-  dynamic get currentValue =>
-      _current == null ? null : LevelEncoding._decodeValue(new Uint8List.view(_current.buffer, 4 + (_current[3] << 8) + _current[2]), _iterable._valueEncoding);
+  V get currentValue =>
+      _current == null ? null : _valueEncoding.decode(new Uint8List.view(_current.buffer, 4 + (_current[3] << 8) + _current[2]));
 
   @override
-  LevelItem get current {
-    return _current == null ? null : new LevelItem._internal(currentKey, currentValue);
+  LevelItem<K, V> get current {
+    return _current == null ? null : new LevelItem<K, V>._internal(currentKey, currentValue);
   }
 
   @override
@@ -249,8 +259,8 @@ class LevelIterator extends NativeFieldWrapperClass2 implements Iterator<LevelIt
 }
 
 /// An iterable for the db which creates LevelIterator objects.
-class LevelIterable extends IterableBase<LevelItem> {
-  final LevelDB _db;
+class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
+  final LevelDB<K, V> _db;
 
   final int _limit;
   final bool _fillCache;
@@ -261,30 +271,25 @@ class LevelIterable extends IterableBase<LevelItem> {
   final Object _lt;
   final bool _isLtClosed;
 
-  final LevelEncoding _keyEncoding;
-  final LevelEncoding _valueEncoding;
-
-  LevelIterable._internal(LevelDB db, int limit, bool fillCache, Object gt, bool isGtClosed, Object lt, bool isLtClosed, LevelEncoding keyEncoding, LevelEncoding valueEncoding) :
+  LevelIterable._internal(LevelDB<K, V> db, int limit, bool fillCache, K gt, bool isGtClosed, K lt, bool isLtClosed) :
       _db = db,
       _limit = limit,
       _fillCache = fillCache,
       _gt = gt,
       _isGtClosed = isGtClosed,
       _lt = lt,
-      _isLtClosed = isLtClosed,
-      _keyEncoding = keyEncoding,
-      _valueEncoding = valueEncoding;
+      _isLtClosed = isLtClosed;
 
   @override
-  LevelIterator get iterator {
-    LevelIterator ret = new LevelIterator._internal(this);
+  LevelIterator<K, V> get iterator {
+    LevelIterator<K, V> ret = new LevelIterator<K, V>._internal(this);
     Uint8List ltEncoded;
     if (_lt != null) {
-      ltEncoded = LevelEncoding._encodeValue(_lt, _keyEncoding);
+      ltEncoded = _db._keyEncoding.encode(_lt);
     }
     Uint8List gtEncoded;
     if (_gt != null) {
-      gtEncoded = LevelEncoding._encodeValue(_gt, _keyEncoding);
+      gtEncoded = _db._keyEncoding.encode(_gt);
     }
 
     ret._init(_db, _limit, _fillCache, gtEncoded, _isGtClosed, ltEncoded, _isLtClosed);
@@ -292,16 +297,16 @@ class LevelIterable extends IterableBase<LevelItem> {
   }
 
   /// Returns an iterable of the keys in the db
-  Iterable<dynamic> get keys sync* {
-    LevelIterator it = iterator;
+  Iterable<K> get keys sync* {
+    LevelIterator<K, V> it = iterator;
     while (it.moveNext()) {
       yield it.currentKey;
     }
   }
 
   /// Returns an iterable of the values in the db
-  Iterable<dynamic> get values sync* {
-    LevelIterator it = iterator;
+  Iterable<V> get values sync* {
+    LevelIterator<K, V> it = iterator;
     while (it.moveNext()) {
       yield it.currentValue;
     }

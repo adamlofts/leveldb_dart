@@ -23,7 +23,7 @@ Future<dynamic> main() async {
 Future<Null> run(int index) async {
   // Because shared: true is passed the DB returned by this method will reference the same
   // database.
-  LevelDB db = await LevelDB.open("/tmp/testdb", shared: true);
+  LevelDB<String, String> db = await LevelDB.open("/tmp/testdb", shared: true);
 
   // Write our key to the db
   print("Thread $index write key $index -> $index");
