@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.0.0-beta
+## 3.0.0
 
 Breaking changes:
 
@@ -10,7 +10,7 @@ Key/Value encoding parameters have been moved to the `LevelDB.open` function.
 
 Non-breaking changes:
 
-- Upgrade to leveldb 1.20. See: https://github.com/google/leveldb/releases/tag/v1.20
+- Upgrade to leveldb 1.20. This version is compatible with the previous on-disk format. See: https://github.com/google/leveldb/releases/tag/v1.20
 - Add `shared` parameter to `LevelDB.open`. This feature allows referencing
 the same underlying database from multiple isolates.
 - Add an example demonstrating how to use the `shared` parameter in muliple
