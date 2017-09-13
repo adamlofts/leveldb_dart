@@ -1,4 +1,3 @@
-
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
@@ -17,22 +16,24 @@ Future<LevelDB<String, String>> _openTestDB(
   return LevelDB.openUtf8('/tmp/test-level-db-dart-$index', shared: shared);
 }
 
-Future<LevelDB<K, V>> _openTestDBEnc<K, V>(LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding,
+Future<LevelDB<K, V>> _openTestDBEnc<K, V>(
+    LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding,
     {int index: 0, bool shared: false, bool clean: true}) async {
   Directory d = new Directory('/tmp/test-level-db-dart-$index');
   if (clean && d.existsSync()) {
     await d.delete(recursive: true);
   }
-  return LevelDB.open('/tmp/test-level-db-dart-$index', shared: shared, keyEncoding: keyEncoding, valueEncoding: valueEncoding);
+  return LevelDB.open('/tmp/test-level-db-dart-$index',
+      shared: shared, keyEncoding: keyEncoding, valueEncoding: valueEncoding);
 }
-
 
 const Matcher _isClosedError = const _ClosedMatcher();
 
 class _ClosedMatcher extends TypeMatcher {
   const _ClosedMatcher() : super("LevelDBClosedError");
   @override
-  bool matches(dynamic item, Map<dynamic, dynamic> matchState) => item is LevelClosedError;
+  bool matches(dynamic item, Map<dynamic, dynamic> matchState) =>
+      item is LevelClosedError;
 }
 
 const Matcher _isInvalidArgumentError = const _InvalidArgumentMatcher();
@@ -40,7 +41,8 @@ const Matcher _isInvalidArgumentError = const _InvalidArgumentMatcher();
 class _InvalidArgumentMatcher extends TypeMatcher {
   const _InvalidArgumentMatcher() : super("LevelInvalidArgumentError");
   @override
-  bool matches(dynamic item, Map<dynamic, dynamic> matchState) => item is LevelInvalidArgumentError;
+  bool matches(dynamic item, Map<dynamic, dynamic> matchState) =>
+      item is LevelInvalidArgumentError;
 }
 
 /// Set this tag to skip running on travis.
@@ -101,8 +103,7 @@ void main() {
 
     LevelDB<Uint8List, Uint8List> db2 = await _openTestDBEnc(
         LevelEncoding.none, LevelEncoding.none,
-        clean: false
-    );
+        clean: false);
 
     // Test with LevelEncodingNone
     Uint8List key = new Uint8List(2);
@@ -208,16 +209,13 @@ void main() {
   test('Test with None encoding', () async {
     LevelDB<Uint8List, Uint8List> dbNone = await _openTestDBEnc(
         LevelEncoding.none, LevelEncoding.none,
-        shared: true
-    );
+        shared: true);
     LevelDB<String, String> dbAscii = await _openTestDBEnc(
         LevelEncoding.ascii, LevelEncoding.ascii,
-        shared: true, clean: false
-    );
+        shared: true, clean: false);
     LevelDB<String, String> dbUtf8 = await _openTestDBEnc(
         LevelEncoding.utf8, LevelEncoding.utf8,
-        shared: true, clean: false
-    );
+        shared: true, clean: false);
     Uint8List v = new Uint8List.fromList(UTF8.encode("key1"));
     dbNone.put(v, v);
 
@@ -260,13 +258,19 @@ void main() {
   });
 
   test('Test no create if missing', () async {
-    expect(LevelDB.openUtf8('/tmp/test-level-db-dart-DOES-NOT-EXIST', createIfMissing: false), throwsA(_isInvalidArgumentError));
+    expect(
+        LevelDB.openUtf8('/tmp/test-level-db-dart-DOES-NOT-EXIST',
+            createIfMissing: false),
+        throwsA(_isInvalidArgumentError));
   });
 
   test('Test error if exists', () async {
-    LevelDB<String, String> db = await LevelDB.openUtf8('/tmp/test-level-db-dart-exists');
+    LevelDB<String, String> db =
+        await LevelDB.openUtf8('/tmp/test-level-db-dart-exists');
     db.close();
-    expect(LevelDB.openUtf8('/tmp/test-level-db-dart-exists', errorIfExists: true), throwsA(_isInvalidArgumentError));
+    expect(
+        LevelDB.openUtf8('/tmp/test-level-db-dart-exists', errorIfExists: true),
+        throwsA(_isInvalidArgumentError));
   });
 
   test('LevelDB sync iterator', () async {
@@ -278,8 +282,10 @@ void main() {
     // All keys
     List<LevelItem<String, String>> items1 = db.getItems().toList();
     expect(items1.length, equals(2));
-    expect(items1.map((LevelItem<String, String> i) => i.key).toList(), equals(<String>["k1", "k2"]));
-    expect(items1.map((LevelItem<String, String> i) => i.value).toList(), equals(<String>["v", "v"]));
+    expect(items1.map((LevelItem<String, String> i) => i.key).toList(),
+        equals(<String>["k1", "k2"]));
+    expect(items1.map((LevelItem<String, String> i) => i.value).toList(),
+        equals(<String>["v", "v"]));
 
     List<LevelItem<String, String>> items = db.getItems(gte: "k1").toList();
     expect(items.length, equals(2));
@@ -314,7 +320,8 @@ void main() {
     items = db.getItems(gte: "k1", lte: "k2").toList();
     expect(items.length, equals(2));
 
-    String val = "bv-12345678901234567890123456789012345678901234567890123456789012345678901234567890";
+    String val =
+        "bv-12345678901234567890123456789012345678901234567890123456789012345678901234567890";
     db.put("a", val);
     LevelItem<String, String> item = db.getItems(lte: "a").first;
     expect(item.value.length, val.length);
@@ -361,14 +368,14 @@ void main() {
     expect(it.moveNext(), false);
     expect(it.current, null);
     for (int _ in new Iterable<int>.generate(10)) {
-      expect(it.moveNext(), false); // Dart requires that it is safe to call moveNext after the end.
+      expect(it.moveNext(),
+          false); // Dart requires that it is safe to call moveNext after the end.
       expect(it.current, null);
       expect(it.currentKey, null);
       expect(it.currentValue, null);
     }
     db.close();
   });
-
 
   test('Shared db in same isolate', () async {
     LevelDB<String, String> db = await _openTestDB(shared: true);
@@ -389,7 +396,6 @@ void main() {
     db1.close();
     expect(() => db1.get("SOME KEY"), throwsA(_isClosedError));
   });
-
 
   test('Shared db removed from map', () async {
     // Test that a shared db is correctly removed from the shared map when closed.
@@ -413,8 +419,10 @@ void main() {
           completer.complete();
         }
       });
-      RawReceivePort errorPort = new RawReceivePort((dynamic v) => completer.completeError(v));
-      Isolate.spawn(_isolateTest, index, onExit: exitPort.sendPort, onError: errorPort.sendPort);
+      RawReceivePort errorPort =
+          new RawReceivePort((dynamic v) => completer.completeError(v));
+      Isolate.spawn(_isolateTest, index,
+          onExit: exitPort.sendPort, onError: errorPort.sendPort);
       return completer.future;
     }
 

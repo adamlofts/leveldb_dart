@@ -10,6 +10,12 @@ matrix:
   include:
     - os: linux
       dist: trusty
-
     - os: linux
       dist: precise
+
+dart_task:
+- test: --platform vm
+- dartanalyzer: --fatal-warnings .
+- dartfmt
+
+
