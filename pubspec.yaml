@@ -1,5 +1,5 @@
 name: leveldb
-description: Dart bindings for the LevelDB key value store. Edit
+description: Dart bindings for the LevelDB key value store.
 version: 4.0.0
 author: Adam Lofts <adam.lofts@gmail.com>
 homepage: https://github.com/adamlofts/leveldb_dart
