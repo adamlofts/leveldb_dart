@@ -8,16 +8,24 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 import 'package:leveldb/leveldb.dart';
 
-Future<LevelDB<K, V>> _openTestDB<K, V>(
-    {int index: 0, bool shared: false, bool clean: true,
-    LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding}) async {
+Future<LevelDB<String, String>> _openTestDB(
+    {int index: 0, bool shared: false, bool clean: true}) async {
   Directory d = new Directory('/tmp/test-level-db-dart-$index');
   if (clean && d.existsSync()) {
     await d.delete(recursive: true);
   }
-  return (await LevelDB.open<K, V>('/tmp/test-level-db-dart-$index', shared: shared,
-    keyEncoding: keyEncoding, valueEncoding: valueEncoding));
+  return LevelDB.openUtf8('/tmp/test-level-db-dart-$index', shared: shared);
 }
+
+Future<LevelDB<K, V>> _openTestDBEnc<K, V>(LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding,
+    {int index: 0, bool shared: false, bool clean: true}) async {
+  Directory d = new Directory('/tmp/test-level-db-dart-$index');
+  if (clean && d.existsSync()) {
+    await d.delete(recursive: true);
+  }
+  return LevelDB.open('/tmp/test-level-db-dart-$index', shared: shared, keyEncoding: keyEncoding, valueEncoding: valueEncoding);
+}
+
 
 const Matcher _isClosedError = const _ClosedMatcher();
 
@@ -91,8 +99,8 @@ void main() {
 
     db.close();
 
-    LevelDB<Uint8List, Uint8List> db2 = await _openTestDB<Uint8List, Uint8List>(
-        keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none,
+    LevelDB<Uint8List, Uint8List> db2 = await _openTestDBEnc(
+        LevelEncoding.none, LevelEncoding.none,
         clean: false
     );
 
@@ -198,16 +206,16 @@ void main() {
   });
 
   test('Test with None encoding', () async {
-    LevelDB<Uint8List, Uint8List> dbNone = await _openTestDB(
-        keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none,
+    LevelDB<Uint8List, Uint8List> dbNone = await _openTestDBEnc(
+        LevelEncoding.none, LevelEncoding.none,
         shared: true
     );
-    LevelDB<String, String> dbAscii = await _openTestDB(
-        keyEncoding: LevelEncoding.ascii, valueEncoding: LevelEncoding.ascii,
+    LevelDB<String, String> dbAscii = await _openTestDBEnc(
+        LevelEncoding.ascii, LevelEncoding.ascii,
         shared: true, clean: false
     );
-    LevelDB<String, String> dbUtf8 = await _openTestDB(
-        keyEncoding: LevelEncoding.utf8, valueEncoding: LevelEncoding.utf8,
+    LevelDB<String, String> dbUtf8 = await _openTestDBEnc(
+        LevelEncoding.utf8, LevelEncoding.utf8,
         shared: true, clean: false
     );
     Uint8List v = new Uint8List.fromList(UTF8.encode("key1"));
@@ -252,13 +260,13 @@ void main() {
   });
 
   test('Test no create if missing', () async {
-    expect(LevelDB.open('/tmp/test-level-db-dart-DOES-NOT-EXIST', createIfMissing: false), throwsA(_isInvalidArgumentError));
+    expect(LevelDB.openUtf8('/tmp/test-level-db-dart-DOES-NOT-EXIST', createIfMissing: false), throwsA(_isInvalidArgumentError));
   });
 
   test('Test error if exists', () async {
-    LevelDB<String, String> db = await LevelDB.open('/tmp/test-level-db-dart-exists');
+    LevelDB<String, String> db = await LevelDB.openUtf8('/tmp/test-level-db-dart-exists');
     db.close();
-    expect(LevelDB.open('/tmp/test-level-db-dart-exists', errorIfExists: true), throwsA(_isInvalidArgumentError));
+    expect(LevelDB.openUtf8('/tmp/test-level-db-dart-exists', errorIfExists: true), throwsA(_isInvalidArgumentError));
   });
 
   test('LevelDB sync iterator', () async {
@@ -400,7 +408,7 @@ void main() {
     // in opening and closing the db.
     Future<Null> run(int index) {
       Completer<Null> completer = new Completer<Null>();
-      RawReceivePort exitPort = new RawReceivePort((_) {
+      RawReceivePort exitPort = new RawReceivePort((dynamic _) {
         if (!completer.isCompleted) {
           completer.complete();
         }

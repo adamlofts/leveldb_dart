@@ -45,7 +45,7 @@ class Runner {
 
   /// Run an isolate.
   Runner.spawn(int index) {
-    _finishPort.handler = (_) {
+    _finishPort.handler = (dynamic _) {
       _finish.complete();
       _finishPort.close();
     };

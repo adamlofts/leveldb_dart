@@ -131,9 +131,15 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   /// See [open] for information on optional parameters.
   static Future<LevelDB<String, String>> openUtf8(String path,
       {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) =>
-      // Default encoding is utf8 so no need to specify.
-      open<String, String>(path,
-          shared: shared, blockSize: blockSize, createIfMissing: createIfMissing, errorIfExists: errorIfExists);
+    open<String, String>(
+        path,
+        shared: shared,
+        blockSize: blockSize,
+        createIfMissing: createIfMissing,
+        errorIfExists: errorIfExists,
+        keyEncoding: LevelEncoding.utf8,
+        valueEncoding: LevelEncoding.utf8,
+    );
 
   /// Open a database at [path] using raw [Uint8List] keys and values.
   ///
@@ -150,17 +156,17 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   /// in another isolate calling [open] with the same [path] will share the underlying database and data changes
   /// will be visible to both.
   ///
-  /// If [keyEncoding] or [valueEncoding] is specified then the given encoding will
+  /// [keyEncoding] or [valueEncoding] must be specified. The given encoding will
   /// be used to encoding and decode keys or values respectively. The encodings must match the generic
-  /// type of the database. The default encoding is [LevelEncoding.utf8] resulting in a `LevelDB<String, String>`.
+  /// type of the database.
   static Future<LevelDB<K, V>> open<K, V>(String path,
       {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false,
       LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding}) {
+    assert(keyEncoding != null);
+    assert(valueEncoding != null);
     Completer<LevelDB<K, V>> completer = new Completer<LevelDB<K, V>>();
     RawReceivePort replyPort = new RawReceivePort();
-
-    LevelDB<K, V> db = new LevelDB<K, V>._internal(
-        keyEncoding ?? LevelEncoding.utf8, valueEncoding ?? LevelEncoding.utf8);
+    LevelDB<K, V> db = new LevelDB<K, V>._internal(keyEncoding, valueEncoding);
     replyPort.handler = (dynamic result) {
       replyPort.close();
       if (_completeError(completer, result)) {
@@ -265,10 +271,10 @@ class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
   final int _limit;
   final bool _fillCache;
 
-  final Object _gt;
+  final K _gt;
   final bool _isGtClosed;
 
-  final Object _lt;
+  final K _lt;
   final bool _isLtClosed;
 
   LevelIterable._internal(LevelDB<K, V> db, int limit, bool fillCache, K gt, bool isGtClosed, K lt, bool isLtClosed) :

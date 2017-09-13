@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.0.0
+
+Minor API update for [Sound Dart](https://www.dartlang.org/guides/language/sound-dart)
+ 
+Breaking changes:
+- The `keyEncoding` and `valueEncoding` parameters are now required when using the `LevelDB.open` function.
+When encoding utf8 keys and values `LevelDB.openUtf8` is the recommended constructor. 
+
 ## 3.0.0
 
 Breaking changes:
