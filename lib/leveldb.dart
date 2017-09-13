@@ -36,7 +36,8 @@ class LevelCorruptionError extends LevelError {
 
 /// Exception thrown if invalid argument (e.g. if the database does not exist and createIfMissing is false)
 class LevelInvalidArgumentError extends LevelError {
-  const LevelInvalidArgumentError._internal() : super._internal("Invalid argument");
+  const LevelInvalidArgumentError._internal()
+      : super._internal("Invalid argument");
 }
 
 /// Interface for specifying an encoding. The encoding must encode the object to a Uint8List and decode
@@ -44,6 +45,7 @@ class LevelInvalidArgumentError extends LevelError {
 abstract class LevelEncoding<T> {
   /// Encode to a Uint8List
   Uint8List encode(T v);
+
   /// Decode from a Uint8List
   T decode(Uint8List v);
 
@@ -72,7 +74,8 @@ class _LevelEncodingAscii implements LevelEncoding<String> {
   // Ascii encoding
   const _LevelEncodingAscii();
   @override
-  Uint8List encode(String v) => new Uint8List.fromList(const AsciiCodec().encode(v));
+  Uint8List encode(String v) =>
+      new Uint8List.fromList(const AsciiCodec().encode(v));
   @override
   String decode(Uint8List v) => const AsciiCodec().decode(v);
 }
@@ -87,13 +90,13 @@ class _LevelEncodingNone implements LevelEncoding<Uint8List> {
 
 /// A key-value database
 class LevelDB<K, V> extends NativeFieldWrapperClass2 {
-
   final LevelEncoding<K> _keyEncoding;
   final LevelEncoding<V> _valueEncoding;
 
   LevelDB._internal(this._keyEncoding, this._valueEncoding);
 
-  void _open(bool shared, SendPort port, String path, int blockSize, bool createIfMissing, bool errorIfExists) native "DB_Open";
+  void _open(bool shared, SendPort port, String path, int blockSize,
+      bool createIfMissing, bool errorIfExists) native "DB_Open";
 
   Uint8List _syncGet(Uint8List key) native "SyncGet";
   void _syncPut(Uint8List key, Uint8List value, bool sync) native "SyncPut";
@@ -130,8 +133,11 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   ///
   /// See [open] for information on optional parameters.
   static Future<LevelDB<String, String>> openUtf8(String path,
-      {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) =>
-    open<String, String>(
+          {bool shared: false,
+          int blockSize: 4096,
+          bool createIfMissing: true,
+          bool errorIfExists: false}) =>
+      open<String, String>(
         path,
         shared: shared,
         blockSize: blockSize,
@@ -139,16 +145,23 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
         errorIfExists: errorIfExists,
         keyEncoding: LevelEncoding.utf8,
         valueEncoding: LevelEncoding.utf8,
-    );
+      );
 
   /// Open a database at [path] using raw [Uint8List] keys and values.
   ///
   /// See [open] for information on optional parameters.
   static Future<LevelDB<Uint8List, Uint8List>> openUint8List(String path,
-      {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false}) =>
-    open<Uint8List, Uint8List>(path,
-        keyEncoding: LevelEncoding.none, valueEncoding: LevelEncoding.none,
-        shared: shared, blockSize: blockSize, createIfMissing: createIfMissing, errorIfExists: errorIfExists);
+          {bool shared: false,
+          int blockSize: 4096,
+          bool createIfMissing: true,
+          bool errorIfExists: false}) =>
+      open<Uint8List, Uint8List>(path,
+          keyEncoding: LevelEncoding.none,
+          valueEncoding: LevelEncoding.none,
+          shared: shared,
+          blockSize: blockSize,
+          createIfMissing: createIfMissing,
+          errorIfExists: errorIfExists);
 
   /// Open a database at [path]
   ///
@@ -160,8 +173,12 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   /// be used to encoding and decode keys or values respectively. The encodings must match the generic
   /// type of the database.
   static Future<LevelDB<K, V>> open<K, V>(String path,
-      {bool shared: false, int blockSize: 4096, bool createIfMissing: true, bool errorIfExists: false,
-      LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding}) {
+      {bool shared: false,
+      int blockSize: 4096,
+      bool createIfMissing: true,
+      bool errorIfExists: false,
+      LevelEncoding<K> keyEncoding,
+      LevelEncoding<V> valueEncoding}) {
     assert(keyEncoding != null);
     assert(valueEncoding != null);
     Completer<LevelDB<K, V>> completer = new Completer<LevelDB<K, V>>();
@@ -174,7 +191,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
       }
       completer.complete(db);
     };
-    db._open(shared, replyPort.sendPort, path, blockSize, createIfMissing, errorIfExists);
+    db._open(shared, replyPort.sendPort, path, blockSize, createIfMissing,
+        errorIfExists);
     return completer.future;
   }
 
@@ -196,7 +214,7 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   }
 
   /// Set a key to a value.
-  void put(K key, V value, { bool sync: false }) {
+  void put(K key, V value, {bool sync: false}) {
     Uint8List keyEnc = _keyEncoding.encode(key);
     Uint8List valueEnc = _valueEncoding.encode(value);
     _syncPut(keyEnc, valueEnc, sync);
@@ -210,15 +228,10 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
 
   /// Return an iterable which will iterate through the db in key order returning key-value items. This iterable
   /// is synchronous so will block when moving.
-  LevelIterable<K, V> getItems({ K gt, K gte, K lt, K lte, int limit: -1, bool fillCache: true }) {
-    return new LevelIterable<K, V>._internal(this,
-        limit,
-        fillCache,
-        gt == null ? gte : gt,
-        gt == null,
-        lt == null ? lte : lt,
-        lt == null
-    );
+  LevelIterable<K, V> getItems(
+      {K gt, K gte, K lt, K lte, int limit: -1, bool fillCache: true}) {
+    return new LevelIterable<K, V>._internal(this, limit, fillCache,
+        gt == null ? gte : gt, gt == null, lt == null ? lte : lt, lt == null);
   }
 }
 
@@ -226,35 +239,44 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
 class LevelItem<K, V> {
   /// The key. Type is determined by the keyEncoding specified
   final K key;
+
   /// The value. Type is determined by the valueEncoding specified
   final V value;
   LevelItem._internal(this.key, this.value);
 }
 
 /// An iterator
-class LevelIterator<K, V> extends NativeFieldWrapperClass2 implements Iterator<LevelItem<K, V>> {
+class LevelIterator<K, V> extends NativeFieldWrapperClass2
+    implements Iterator<LevelItem<K, V>> {
   final LevelEncoding<K> _keyEncoding;
   final LevelEncoding<V> _valueEncoding;
 
-  LevelIterator._internal(LevelIterable<K, V> it) :
-      _keyEncoding = it._db._keyEncoding,
-      _valueEncoding = it._db._valueEncoding;
+  LevelIterator._internal(LevelIterable<K, V> it)
+      : _keyEncoding = it._db._keyEncoding,
+        _valueEncoding = it._db._valueEncoding;
 
-  int _init(LevelDB<K, V> db, int limit, bool fillCache, Uint8List gt, bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
+  int _init(LevelDB<K, V> db, int limit, bool fillCache, Uint8List gt,
+      bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
   Uint8List _next() native "SyncIterator_Next";
   Uint8List _current;
 
   /// The key of the current LevelItem
-  K get currentKey =>
-      _current == null ? null : _keyEncoding.decode(new Uint8List.view(_current.buffer, 4, (_current[1] << 8) + _current[0]));
+  K get currentKey => _current == null
+      ? null
+      : _keyEncoding.decode(new Uint8List.view(
+          _current.buffer, 4, (_current[1] << 8) + _current[0]));
 
   /// The value of the current LevelItem
-  V get currentValue =>
-      _current == null ? null : _valueEncoding.decode(new Uint8List.view(_current.buffer, 4 + (_current[3] << 8) + _current[2]));
+  V get currentValue => _current == null
+      ? null
+      : _valueEncoding.decode(new Uint8List.view(
+          _current.buffer, 4 + (_current[3] << 8) + _current[2]));
 
   @override
   LevelItem<K, V> get current {
-    return _current == null ? null : new LevelItem<K, V>._internal(currentKey, currentValue);
+    return _current == null
+        ? null
+        : new LevelItem<K, V>._internal(currentKey, currentValue);
   }
 
   @override
@@ -277,14 +299,15 @@ class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
   final K _lt;
   final bool _isLtClosed;
 
-  LevelIterable._internal(LevelDB<K, V> db, int limit, bool fillCache, K gt, bool isGtClosed, K lt, bool isLtClosed) :
-      _db = db,
-      _limit = limit,
-      _fillCache = fillCache,
-      _gt = gt,
-      _isGtClosed = isGtClosed,
-      _lt = lt,
-      _isLtClosed = isLtClosed;
+  LevelIterable._internal(LevelDB<K, V> db, int limit, bool fillCache, K gt,
+      bool isGtClosed, K lt, bool isLtClosed)
+      : _db = db,
+        _limit = limit,
+        _fillCache = fillCache,
+        _gt = gt,
+        _isGtClosed = isGtClosed,
+        _lt = lt,
+        _isLtClosed = isLtClosed;
 
   @override
   LevelIterator<K, V> get iterator {
@@ -298,7 +321,8 @@ class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
       gtEncoded = _db._keyEncoding.encode(_gt);
     }
 
-    ret._init(_db, _limit, _fillCache, gtEncoded, _isGtClosed, ltEncoded, _isLtClosed);
+    ret._init(_db, _limit, _fillCache, gtEncoded, _isGtClosed, ltEncoded,
+        _isLtClosed);
     return ret;
   }
 

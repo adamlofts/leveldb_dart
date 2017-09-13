@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -6,7 +5,6 @@ import 'package:leveldb/leveldb.dart';
 
 /// main example.
 Future<dynamic> main() async {
-
   // Open a database. It is created if it does not already exist. Only one process can
   // open a database at a time.
   LevelDB<String, String> db = await LevelDB.openUtf8("/tmp/testdb");
@@ -32,12 +30,14 @@ Future<dynamic> main() async {
 
   // Iterate through the key-value pairs in key order.
   for (LevelItem<String, String> v in db.getItems()) {
-    print("Row: ${v.key} ${v.value}");  // prints Row: key-0 value-0, Row: key-1 value-1, ...
+    print(
+        "Row: ${v.key} ${v.value}"); // prints Row: key-0 value-0, Row: key-1 value-1, ...
   }
 
   // Iterate keys between key-1 and key-3
   for (LevelItem<String, String> v in db.getItems(gte: "key-1", lte: "key-3")) {
-    print("Row: ${v.key} ${v.value}");  // prints Row: key-1 value-1, Row: key-2 value-2, Row: key-3 value-3
+    print(
+        "Row: ${v.key} ${v.value}"); // prints Row: key-1 value-1, Row: key-2 value-2, Row: key-3 value-3
   }
 
   // Iterate explicitly. This avoids allocation of LevelItem objects if you never call it.current.
@@ -61,7 +61,8 @@ Future<dynamic> main() async {
   db.close();
 
   // Open a new db which will use raw UInt8List data. This is faster since it avoids any decoding.
-  LevelDB<Uint8List, Uint8List> db2 = await LevelDB.openUint8List("/tmp/testdb");
+  LevelDB<Uint8List, Uint8List> db2 =
+      await LevelDB.openUint8List("/tmp/testdb");
 
   for (LevelItem<Uint8List, Uint8List> item in db2.getItems()) {
     print("${item.key}"); // Prints [107, 101, 121, 45, 48], ...

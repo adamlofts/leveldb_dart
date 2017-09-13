@@ -1,23 +1,19 @@
-
 import 'dart:async';
 import 'dart:isolate';
 
 import 'package:leveldb/leveldb.dart';
-
 
 /// This example demonstrates how to access a database from multiple isolates.
 /// Isolates are implemented as os-threads in the dart vm so this allows you to
 /// use multiple cores. Access to the underlying level db from multiple isolates is safe.
 Future<dynamic> main() async {
   // Spawn some isolates. Each of these will write a key then read a key from the next thread.
-  List<Runner> runners = new Iterable<int>.generate(5)
-      .map((int index) {
+  List<Runner> runners = new Iterable<int>.generate(5).map((int index) {
     return new Runner.spawn(index);
   }).toList();
 
   await Future.wait(runners.map((Runner r) => r.finish));
 }
-
 
 /// This method is called in different OS threads by the dart VM.
 Future<Null> run(int index) async {
@@ -36,7 +32,6 @@ Future<Null> run(int index) async {
   String nextKey = "${(index + 1) % 5}";
   print("Thread $index read key $nextKey -> ${db.get(nextKey)}");
 }
-
 
 /// Helper class to run an isolate and wait for it to finish.
 class Runner {
