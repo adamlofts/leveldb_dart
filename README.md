@@ -72,6 +72,7 @@ See [example/isolate.dart](example/isolate.dart) for an example of using a datab
 
 Feature Support
 ---------------
+
 - [x] Read and write keys
 - [x] Forward iteration
 - [x] Multi-isolate
@@ -80,5 +81,11 @@ Feature Support
 - [ ] Bulk get / put
 
 
+Custom Encoding and Decoding
+----------------------------
+
+By default you can use `LevelDB.openUtf8` to open a database with `String` keys and values which are encoded in UTF8. The `dart:codec` library 
+can be used to create databases with custom encodings. See [example/json.dart](example/json.dart) 
+for an example which stores dart objects to the database via JSON encoding.
 
 

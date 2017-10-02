@@ -2,10 +2,10 @@
 
 library leveldb;
 
+import 'dart:convert' show Codec, Converter, UTF8, AsciiCodec;
 import 'dart:async' show Future, Completer;
 import 'dart:isolate' show RawReceivePort, SendPort;
 import 'dart:typed_data' show Uint8List;
-import 'dart:convert' show UTF8, AsciiCodec;
 import 'dart:nativewrappers' show NativeFieldWrapperClass2;
 import 'dart:collection' show IterableBase;
 
@@ -40,58 +40,46 @@ class LevelInvalidArgumentError extends LevelError {
       : super._internal("Invalid argument");
 }
 
-/// Interface for specifying an encoding. The encoding must encode the object to a Uint8List and decode
-/// from a Uint8List.
-abstract class LevelEncoding<T> {
-  /// Encode to a Uint8List
-  Uint8List encode(T v);
-
-  /// Decode from a Uint8List
-  T decode(Uint8List v);
-
-  /// The none encoding does no encoding. You must pass in a Uint8List to all fucntions.
-  /// Because it does no transformation it reduces the number of allocations.
-  /// Use this encoding for performance.
-  static LevelEncoding<Uint8List> get none => const _LevelEncodingNone();
-
-  /// Default encoding. Expects to be passed a String and will encode/decode to UTF8 in the db.
-  static LevelEncoding<String> get utf8 => const _LevelEncodingUtf8();
-
-  /// Ascii encoding. Potentially faster than UTF8 for ascii-only text (untested).
-  static LevelEncoding<String> get ascii => const _LevelEncodingAscii();
+class _Uint8ListEncoder extends Converter<List<int>, Uint8List> {
+  const _Uint8ListEncoder();
+  @override
+  Uint8List convert(List<int> input) => new Uint8List.fromList(input);
 }
 
-class _LevelEncodingUtf8 implements LevelEncoding<String> {
-  /// Default UTF8 encoding.
-  const _LevelEncodingUtf8();
+class _Uint8ListDecoder extends Converter<Uint8List, List<int>> {
+  const _Uint8ListDecoder();
   @override
-  Uint8List encode(String v) => new Uint8List.fromList(UTF8.encode(v));
-  @override
-  String decode(Uint8List v) => UTF8.decode(v);
+  List<int> convert(Uint8List input) => input;
 }
 
-class _LevelEncodingAscii implements LevelEncoding<String> {
-  // Ascii encoding
-  const _LevelEncodingAscii();
+/// This codec will encode a [List<int>] to the [Uint8List] required by LevelDB dart.
+class Uint8ListCodec extends Codec<List<int>, Uint8List> {
+  /// Default constructor
+  const Uint8ListCodec();
   @override
-  Uint8List encode(String v) =>
-      new Uint8List.fromList(const AsciiCodec().encode(v));
+  Converter<List<int>, Uint8List> get encoder => const _Uint8ListEncoder();
   @override
-  String decode(Uint8List v) => const AsciiCodec().decode(v);
+  Converter<Uint8List, List<int>> get decoder => const _Uint8ListDecoder();
 }
 
-class _LevelEncodingNone implements LevelEncoding<Uint8List> {
-  const _LevelEncodingNone();
+class _IdentityConverter extends Converter<Uint8List, Uint8List> {
+  const _IdentityConverter();
   @override
-  Uint8List encode(Uint8List v) => v;
+  Uint8List convert(Uint8List input) => input;
+}
+
+class _IdentityCodec extends Codec<Uint8List, Uint8List> {
+  const _IdentityCodec();
   @override
-  Uint8List decode(Uint8List v) => v;
+  Converter<Uint8List, Uint8List> get encoder => const _IdentityConverter();
+  @override
+  Converter<Uint8List, Uint8List> get decoder => const _IdentityConverter();
 }
 
 /// A key-value database
 class LevelDB<K, V> extends NativeFieldWrapperClass2 {
-  final LevelEncoding<K> _keyEncoding;
-  final LevelEncoding<V> _valueEncoding;
+  final Codec<K, Uint8List> _keyEncoding;
+  final Codec<V, Uint8List> _valueEncoding;
 
   LevelDB._internal(this._keyEncoding, this._valueEncoding);
 
@@ -128,6 +116,18 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
     return false;
   }
 
+  /// Default encoding. Expects to be passed a String and will encode/decode to UTF8 in the db.
+  static Codec<String, Uint8List> get utf8 => UTF8.fuse(const Uint8ListCodec());
+
+  /// Ascii encoding. Potentially faster than UTF8 for ascii-only text (untested).
+  static Codec<String, Uint8List> get ascii =>
+      const AsciiCodec().fuse(const Uint8ListCodec());
+
+  /// The identity encoding does no encoding. You must pass in a Uint8List to all functions.
+  /// Because it does no transformation it reduces the number of allocations.
+  /// Use this encoding for performance.
+  static Codec<Uint8List, Uint8List> get identity => const _IdentityCodec();
+
   /// Open a database at [path] using [String] keys and values which will be encoded to utf8
   /// in the database.
   ///
@@ -143,8 +143,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
         blockSize: blockSize,
         createIfMissing: createIfMissing,
         errorIfExists: errorIfExists,
-        keyEncoding: LevelEncoding.utf8,
-        valueEncoding: LevelEncoding.utf8,
+        keyEncoding: utf8,
+        valueEncoding: utf8,
       );
 
   /// Open a database at [path] using raw [Uint8List] keys and values.
@@ -156,8 +156,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
           bool createIfMissing: true,
           bool errorIfExists: false}) =>
       open<Uint8List, Uint8List>(path,
-          keyEncoding: LevelEncoding.none,
-          valueEncoding: LevelEncoding.none,
+          keyEncoding: identity,
+          valueEncoding: identity,
           shared: shared,
           blockSize: blockSize,
           createIfMissing: createIfMissing,
@@ -177,8 +177,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
       int blockSize: 4096,
       bool createIfMissing: true,
       bool errorIfExists: false,
-      LevelEncoding<K> keyEncoding,
-      LevelEncoding<V> valueEncoding}) {
+      Codec<K, Uint8List> keyEncoding,
+      Codec<V, Uint8List> valueEncoding}) {
     assert(keyEncoding != null);
     assert(valueEncoding != null);
     Completer<LevelDB<K, V>> completer = new Completer<LevelDB<K, V>>();
@@ -248,8 +248,8 @@ class LevelItem<K, V> {
 /// An iterator
 class LevelIterator<K, V> extends NativeFieldWrapperClass2
     implements Iterator<LevelItem<K, V>> {
-  final LevelEncoding<K> _keyEncoding;
-  final LevelEncoding<V> _valueEncoding;
+  final Codec<K, Uint8List> _keyEncoding;
+  final Codec<V, Uint8List> _valueEncoding;
 
   LevelIterator._internal(LevelIterable<K, V> it)
       : _keyEncoding = it._db._keyEncoding,

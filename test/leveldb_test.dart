@@ -17,7 +17,7 @@ Future<LevelDB<String, String>> _openTestDB(
 }
 
 Future<LevelDB<K, V>> _openTestDBEnc<K, V>(
-    LevelEncoding<K> keyEncoding, LevelEncoding<V> valueEncoding,
+    Codec<K, Uint8List> keyEncoding, Codec<V, Uint8List> valueEncoding,
     {int index: 0, bool shared: false, bool clean: true}) async {
   Directory d = new Directory('/tmp/test-level-db-dart-$index');
   if (clean && d.existsSync()) {
@@ -101,9 +101,8 @@ void main() {
 
     db.close();
 
-    LevelDB<Uint8List, Uint8List> db2 = await _openTestDBEnc(
-        LevelEncoding.none, LevelEncoding.none,
-        clean: false);
+    LevelDB<Uint8List, Uint8List> db2 =
+        await _openTestDBEnc(LevelDB.identity, LevelDB.identity, clean: false);
 
     // Test with LevelEncodingNone
     Uint8List key = new Uint8List(2);
@@ -207,14 +206,13 @@ void main() {
   });
 
   test('Test with None encoding', () async {
-    LevelDB<Uint8List, Uint8List> dbNone = await _openTestDBEnc(
-        LevelEncoding.none, LevelEncoding.none,
-        shared: true);
+    LevelDB<Uint8List, Uint8List> dbNone =
+        await _openTestDBEnc(LevelDB.identity, LevelDB.identity, shared: true);
     LevelDB<String, String> dbAscii = await _openTestDBEnc(
-        LevelEncoding.ascii, LevelEncoding.ascii,
+        LevelDB.ascii, LevelDB.ascii,
         shared: true, clean: false);
     LevelDB<String, String> dbUtf8 = await _openTestDBEnc(
-        LevelEncoding.utf8, LevelEncoding.utf8,
+        LevelDB.utf8, LevelDB.utf8,
         shared: true, clean: false);
     Uint8List v = new Uint8List.fromList(UTF8.encode("key1"));
     dbNone.put(v, v);

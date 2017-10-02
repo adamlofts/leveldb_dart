@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.0.0
+
+Breaking changes:
+
+- Remove `LevelEncoding` interface and use `dart:codec` directly. This better aligns the interface with
+the dart way of encoding and decoding and allows easily fusing new codecs. 
+- Add new json.dart example to demonstrate encoding objects to the database (as JSON).
+
 ## 4.0.0
 
 Minor API update for [Sound Dart](https://www.dartlang.org/guides/language/sound-dart)
