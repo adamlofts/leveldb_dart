@@ -226,7 +226,7 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
     _syncDelete(keyEnc);
   }
 
-  /// Return an [Iterable] which will iterate through the db sorted in key order.
+  /// Return an [Iterable] which will iterate through the db in key byte-collated order.
   ///
   /// To start iteration from a particular point use [gt] or [gte] and the iterator will start at the first key
   /// `>` or `>=` the passed value respectively. To stop iteration before the end use [lt] or [lte] to end at the
@@ -297,7 +297,12 @@ class LevelIterator<K, V> extends NativeFieldWrapperClass2
   }
 }
 
-/// An iterable for the db which creates LevelIterator objects.
+/// An [Iterable<LevelItem>] for iterating over key-value pairs.
+///
+/// Iteration is sorted by key in byte collation order.
+///
+/// You can use the [keys] and [values] getters to get an [Iterable] over just the keys or just the values
+/// in the database.
 class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
   final LevelDB<K, V> _db;
 
@@ -337,7 +342,7 @@ class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
     return ret;
   }
 
-  /// Returns an iterable of the keys in the db
+  /// Returns an [Iterable] of the keys in the db
   Iterable<K> get keys sync* {
     LevelIterator<K, V> it = iterator;
     while (it.moveNext()) {
@@ -345,7 +350,7 @@ class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
     }
   }
 
-  /// Returns an iterable of the values in the db
+  /// Returns an [Iterable] of the values in the db
   Iterable<V> get values sync* {
     LevelIterator<K, V> it = iterator;
     while (it.moveNext()) {
