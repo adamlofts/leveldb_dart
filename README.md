@@ -51,7 +51,7 @@ Future main() async {
   print("value is $value"); // value2 is def
 }
 ```
-Check out [example/main.dart](example/main.dart) to see how to read, write and iterate over keys and values.
+Check out [example/main.dart](https://github.com/adamlofts/leveldb_dart/blob/master/example/main.dart) to see how to read, write and iterate over keys and values.
 
 Documentation
 -------------
@@ -67,7 +67,7 @@ Isolates (Threads)
 returned by this function will share an underlying reference to the object in other isolates and changes will
 be visible between isolates.
 
-See [example/isolate.dart](example/isolate.dart) for an example of using a database from multiple isolates (OS threads).
+See [example/isolate.dart](https://github.com/adamlofts/leveldb_dart/blob/master/example/isolate.dart) for an example of using a database from multiple isolates (OS threads).
 
 
 Feature Support
@@ -85,7 +85,7 @@ Custom Encoding and Decoding
 ----------------------------
 
 By default you can use `LevelDB.openUtf8` to open a database with `String` keys and values which are encoded in UTF8. The `dart:codec` library 
-can be used to create databases with custom encodings. See [example/json.dart](example/json.dart) 
+can be used to create databases with custom encodings. See [example/json.dart](https://github.com/adamlofts/leveldb_dart/blob/master/example/json.dart) 
 for an example which stores dart objects to the database via JSON encoding.
 
 
