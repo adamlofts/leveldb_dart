@@ -226,8 +226,20 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
     _syncDelete(keyEnc);
   }
 
-  /// Return an iterable which will iterate through the db in key order returning key-value items. This iterable
-  /// is synchronous so will block when moving.
+  /// Return an [Iterable] which will iterate through the db sorted in key order.
+  ///
+  /// To change the start of iteration use [gt] or [gte] to begin at the first key > or >= the given limit value.
+  /// To change the end of iteration use [lt] or [lte] to end at the last key < or <= the given limit value.
+  /// You can also use [limit] to limit the total number of items. 
+  ///
+  /// Example to iterate over all items from key 'b' and before 'd' in the collation order:
+  ///
+  ///     getItems(gte: 'b', 'lt': 'd')
+  ///
+  /// 'a' 
+  /// 'b'  <--- start here
+  /// 'c'  <--- end here
+  /// 'd'
   LevelIterable<K, V> getItems(
       {K gt, K gte, K lt, K lte, int limit: -1, bool fillCache: true}) {
     return new LevelIterable<K, V>._internal(this, limit, fillCache,
