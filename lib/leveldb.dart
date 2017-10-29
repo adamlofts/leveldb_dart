@@ -228,18 +228,17 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
 
   /// Return an [Iterable] which will iterate through the db sorted in key order.
   ///
-  /// To change the start of iteration use [gt] or [gte] to begin at the first key > or >= the given limit value.
-  /// To change the end of iteration use [lt] or [lte] to end at the last key < or <= the given limit value.
-  /// You can also use [limit] to limit the total number of items. 
+  /// To start iteration from a particular point use [gt] or [gte] and the iterator will start at the first key
+  /// `>` or `>=` the passed value respectively. To stop iteration before the end use [lt] or [lte] to end at the
+  /// key `<` or `<=` the passed value respectively.
   ///
-  /// Example to iterate over all items from key 'b' and before 'd' in the collation order:
+  /// The [limit] parameter limits the total number of items iterated.
   ///
-  ///     getItems(gte: 'b', 'lt': 'd')
+  /// For example, say a database contains the keys `a`, `b`, `c` and `d`. To iterate over all items from key `b`
+  /// and before `d` in the collation order you can write:
   ///
-  /// 'a' 
-  /// 'b'  <--- start here
-  /// 'c'  <--- end here
-  /// 'd'
+  ///     getItems(gte: 'b', lt: 'd')
+  ///
   LevelIterable<K, V> getItems(
       {K gt, K gte, K lt, K lte, int limit: -1, bool fillCache: true}) {
     return new LevelIterable<K, V>._internal(this, limit, fillCache,
