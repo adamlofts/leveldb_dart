@@ -11,6 +11,8 @@ import 'dart:collection' show IterableBase;
 
 import 'dart-ext:leveldb';
 
+import 'package:meta/meta.dart' show required;
+
 /// Base class for all exceptions thrown by leveldb_dart.
 abstract class LevelError implements Exception {
   final String _msg;
@@ -177,8 +179,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
       int blockSize: 4096,
       bool createIfMissing: true,
       bool errorIfExists: false,
-      Codec<K, Uint8List> keyEncoding,
-      Codec<V, Uint8List> valueEncoding}) {
+      @required Codec<K, Uint8List> keyEncoding,
+      @required Codec<V, Uint8List> valueEncoding}) {
     assert(keyEncoding != null);
     assert(valueEncoding != null);
     Completer<LevelDB<K, V>> completer = new Completer<LevelDB<K, V>>();
