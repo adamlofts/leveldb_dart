@@ -19,13 +19,17 @@ LevelDB stores entries **sorted lexicographically by keys**. This makes [LevelDB
 Platform Support
 ----------------
 
-Only linux 64-bit platform is supported. The following distributions have been tested:
+Modern 64-bit Linux platforms should work fine. The following distributions are known to work:
 
-* Fedora 25
-* Ubuntu 14.04
-* Ubuntu 15.10
+- [x] Fedora 26 64-bit
+- [x] Fedora 25 64-bit
+- [x] Ubuntu 14.04 64-bit
+- [x] Ubuntu 15.10 64-bit
 
-If your platform works and is not listed please let me know so I can add it.
+Unsupported platforms:
+
+- [ ] Mac OS X (See [issue #9](https://github.com/adamlofts/leveldb_dart/issues/9))
+- [ ] Windows (Not supported in base library [issue #466](https://github.com/google/leveldb/issues/466))
 
 Basic usage
 -----------
