@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.1
+
+Non-breaking changes
+
+- Add @required annotation to keyEncoding and valueEncoding in LevelDB.open
+- Improve docs
+
 ## 5.0.0
 
 Breaking changes:
