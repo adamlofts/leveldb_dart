@@ -29,24 +29,15 @@ Future<LevelDB<K, V>> _openTestDBEnc<K, V>(
 
 const Matcher _isClosedError = const _ClosedMatcher();
 
-class _ClosedMatcher extends TypeMatcher {
-  const _ClosedMatcher() : super("LevelDBClosedError");
-  @override
-  bool matches(dynamic item, Map<dynamic, dynamic> matchState) =>
-      item is LevelClosedError;
+class _ClosedMatcher extends TypeMatcher<LevelClosedError> {
+  const _ClosedMatcher();
 }
 
 const Matcher _isInvalidArgumentError = const _InvalidArgumentMatcher();
 
-class _InvalidArgumentMatcher extends TypeMatcher {
-  const _InvalidArgumentMatcher() : super("LevelInvalidArgumentError");
-  @override
-  bool matches(dynamic item, Map<dynamic, dynamic> matchState) =>
-      item is LevelInvalidArgumentError;
+class _InvalidArgumentMatcher extends TypeMatcher<LevelInvalidArgumentError> {
+  const _InvalidArgumentMatcher();
 }
-
-/// Set this tag to skip running on travis.
-const List<String> _skipTravis = const <String>["skip-travis"];
 
 /// tests
 void main() {
@@ -214,7 +205,7 @@ void main() {
     LevelDB<String, String> dbUtf8 = await _openTestDBEnc(
         LevelDB.utf8, LevelDB.utf8,
         shared: true, clean: false);
-    Uint8List v = new Uint8List.fromList(UTF8.encode("key1"));
+    Uint8List v = new Uint8List.fromList(utf8.encode("key1"));
     dbNone.put(v, v);
 
     String s = dbUtf8.get("key1");

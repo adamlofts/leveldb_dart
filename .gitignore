@@ -10,3 +10,5 @@ lib/*.o
 .idea/php.xml
 .idea/markdown-navigator.xml
 .idea/markdown-navigator/
+.dart_tool/
+.idea/inspectionProfiles/

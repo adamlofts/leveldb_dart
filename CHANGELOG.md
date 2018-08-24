@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.0.0
+
+Breaking changes:
+- Upgrade to dart2
+
 ## 5.0.1
 
 Non-breaking changes
