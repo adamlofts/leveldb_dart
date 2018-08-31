@@ -59,9 +59,11 @@ class Uint8ListCodec extends convert.Codec<List<int>, Uint8List> {
   /// Default constructor
   const Uint8ListCodec();
   @override
-  convert.Converter<List<int>, Uint8List> get encoder => const _Uint8ListEncoder();
+  convert.Converter<List<int>, Uint8List> get encoder =>
+      const _Uint8ListEncoder();
   @override
-  convert.Converter<Uint8List, List<int>> get decoder => const _Uint8ListDecoder();
+  convert.Converter<Uint8List, List<int>> get decoder =>
+      const _Uint8ListDecoder();
 }
 
 class _IdentityConverter extends convert.Converter<Uint8List, Uint8List> {
@@ -73,9 +75,11 @@ class _IdentityConverter extends convert.Converter<Uint8List, Uint8List> {
 class _IdentityCodec extends convert.Codec<Uint8List, Uint8List> {
   const _IdentityCodec();
   @override
-  convert.Converter<Uint8List, Uint8List> get encoder => const _IdentityConverter();
+  convert.Converter<Uint8List, Uint8List> get encoder =>
+      const _IdentityConverter();
   @override
-  convert.Converter<Uint8List, Uint8List> get decoder => const _IdentityConverter();
+  convert.Converter<Uint8List, Uint8List> get decoder =>
+      const _IdentityConverter();
 }
 
 /// A key-value database
@@ -119,7 +123,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   }
 
   /// Default encoding. Expects to be passed a String and will encode/decode to UTF8 in the db.
-  static convert.Codec<String, Uint8List> get utf8 => const convert.Utf8Codec().fuse(const Uint8ListCodec());
+  static convert.Codec<String, Uint8List> get utf8 =>
+      const convert.Utf8Codec().fuse(const Uint8ListCodec());
 
   /// Ascii encoding. Potentially faster than UTF8 for ascii-only text (untested).
   static convert.Codec<String, Uint8List> get ascii =>
@@ -128,7 +133,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   /// The identity encoding does no encoding. You must pass in a Uint8List to all functions.
   /// Because it does no transformation it reduces the number of allocations.
   /// Use this encoding for performance.
-  static convert.Codec<Uint8List, Uint8List> get identity => const _IdentityCodec();
+  static convert.Codec<Uint8List, Uint8List> get identity =>
+      const _IdentityCodec();
 
   /// Open a database at [path] using [String] keys and values which will be encoded to utf8
   /// in the database.
