@@ -16,18 +16,29 @@
 LEVELDB_SOURCE=/home/adam/dev/fp3/dart/leveldb-1.20
 DART_SDK=/home/adam/dev/tools/dart-sdk
 
-all: lib/libleveldb.so
-
 LIBS=$(LEVELDB_SOURCE)/out-static/libleveldb.a
 # Select prod/debug args
 ARGS=-O2 -Wall -D_GLIBCXX_USE_CXX11_ABI=0
 # ARGS=-g -O0 -Wall -D_GLIBCXX_USE_CXX11_ABI=0
 
+UNAME_S := $(shell uname -s)
+
+ifeq ($(UNAME_S),Darwin)
+	LIB_NAME = libleveldb.dylib
+	ARGS_LINK = -dynamic -undefined dynamic_lookup
+endif
+ifeq ($(UNAME_S),Linux)
+	LIB_NAME = libleveldb.so
+	ARGS_LINK = -shared -Wl,-soname,$(LIB_NAME)
+endif
+
+all: lib/libleveldb.so
+
 lib/leveldb.o: lib/leveldb.cc
 	g++ $(ARGS) -fPIC -I$(DART_SDK) -I$(LEVELDB_SOURCE)/include -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o
 
 lib/libleveldb.so: lib/leveldb.o
-	gcc $(ARGS) lib/leveldb.o -shared -Wl,-soname,libleveldb.so -o lib/libleveldb.so $(LIBS)
+	gcc $(ARGS) lib/leveldb.o $(ARGS_LINK) -o lib/$(LIB_NAME) $(LIBS)
 
 clean:
-	rm -f lib/*.o lib/*.so
+	rm -f lib/*.o lib/*.so lib/*.dylib
