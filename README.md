@@ -20,11 +20,11 @@ Platform Support
 ----------------
 
 - [x] Modern 64-bit Linux platforms (e.g. Fedora 25, 26, Ubuntu 14.04, 15.10)
+- [x] Mac OS X
 
 Unsupported platforms:
 
 - [ ] Android (See [issue #12](https://github.com/adamlofts/leveldb_dart/issues/12))
-- [ ] Mac OS X (See [issue #9](https://github.com/adamlofts/leveldb_dart/issues/9))
 - [ ] Windows (Not supported in base library [issue #466](https://github.com/google/leveldb/issues/466))
 
 Basic usage
