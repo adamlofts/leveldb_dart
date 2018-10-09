@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.0.1
+
+Non-breaking changes:
+
+- Add OSX platform support
+
 ## 6.0.0
 
 Breaking changes:
