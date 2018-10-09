@@ -12,6 +12,7 @@ matrix:
       dist: trusty
     - os: linux
       dist: precise
+    - os: osx
 
 dart_task:
 - test: --platform vm
