@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.0.2
+
+Non-breaking changes:
+
+- Link to stdc++. This seems to be required for Dart SDK >= 2.2.0
+
 ## 6.0.1
 
 Non-breaking changes:
