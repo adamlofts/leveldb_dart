@@ -14,7 +14,7 @@
 # Then set the source:
 
 LEVELDB_SOURCE=/home/adam/dev/fp3/dart/leveldb-1.20
-DART_SDK=/home/adam/dev/tools/dart-sdk
+DART_SDK=/home/adam/dev/tools/dart-sdk-2
 
 LIBS=$(LEVELDB_SOURCE)/out-static/libleveldb.a
 # Select prod/debug args
@@ -38,7 +38,7 @@ lib/leveldb.o: lib/leveldb.cc
 	g++ $(ARGS) -fPIC -I$(DART_SDK) -I$(LEVELDB_SOURCE)/include -DDART_SHARED_LIB -c lib/leveldb.cc -o lib/leveldb.o
 
 lib/libleveldb.so: lib/leveldb.o
-	gcc $(ARGS) lib/leveldb.o $(ARGS_LINK) -o lib/$(LIB_NAME) $(LIBS)
+	gcc $(ARGS) lib/leveldb.o $(ARGS_LINK) -o lib/$(LIB_NAME) $(LIBS) -lstdc++
 
 clean:
 	rm -f lib/*.o lib/*.so lib/*.dylib
