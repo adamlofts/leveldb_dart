@@ -33,6 +33,12 @@ class _ClosedMatcher extends TypeMatcher<LevelClosedError> {
   const _ClosedMatcher();
 }
 
+const Matcher _isIteratorError = const _IteratorMatcher();
+
+class _IteratorMatcher extends TypeMatcher<LevelInvalidIterator> {
+  const _IteratorMatcher();
+}
+
 const Matcher _isInvalidArgumentError = const _InvalidArgumentMatcher();
 
 class _InvalidArgumentMatcher extends TypeMatcher<LevelInvalidArgumentError> {
@@ -51,7 +57,7 @@ void main() {
     List<dynamic> keys = db.getItems().keys.toList();
     expect(keys.first, equals("k1"));
 
-    String v = db.get("DOESNOTEXIST");
+    String? v = db.get("DOESNOTEXIST");
     expect(v, equals(null));
 
     // All keys
@@ -142,7 +148,7 @@ void main() {
 
     db1.put("a", "1");
 
-    String v = db2.get("a");
+    String? v = db2.get("a");
     expect(v, equals(null));
 
     db1.close();
@@ -208,13 +214,13 @@ void main() {
     Uint8List v = new Uint8List.fromList(utf8.encode("key1"));
     dbNone.put(v, v);
 
-    String s = dbUtf8.get("key1");
+    String? s = dbUtf8.get("key1");
     expect(s, equals("key1"));
 
-    String s2 = dbAscii.get("key1");
+    String? s2 = dbAscii.get("key1");
     expect(s2, equals("key1"));
 
-    Uint8List v2 = dbNone.get(v);
+    Uint8List? v2 = dbNone.get(v);
     expect(v2, equals(v));
 
     dbNone.delete(v);
@@ -346,22 +352,22 @@ void main() {
 
     db.put("k1", "v");
     LevelIterator<String, String> it = db.getItems().iterator;
-    expect(it.current, null);
-    expect(it.currentKey, null);
-    expect(it.currentValue, null);
+    expect(() => it.current, throwsA(_isIteratorError));
+    expect(() => it.currentKey, throwsA(_isIteratorError));
+    expect(() => it.currentValue, throwsA(_isIteratorError));
 
     it.moveNext();
     expect(it.current.key, "k1");
     expect(it.currentKey, "k1");
     expect(it.currentValue, "v");
     expect(it.moveNext(), false);
-    expect(it.current, null);
+    expect(() => it.current, throwsA(_isIteratorError));
     for (int _ in new Iterable<int>.generate(10)) {
       expect(it.moveNext(),
           false); // Dart requires that it is safe to call moveNext after the end.
-      expect(it.current, null);
-      expect(it.currentKey, null);
-      expect(it.currentValue, null);
+      expect(() => it.current, throwsA(_isIteratorError));
+      expect(() => it.currentKey, throwsA(_isIteratorError));
+      expect(() => it.currentValue, throwsA(_isIteratorError));
     }
     db.close();
   });
@@ -409,7 +415,7 @@ void main() {
         }
       });
       RawReceivePort errorPort =
-          new RawReceivePort((dynamic v) => completer.completeError(v));
+          new RawReceivePort((Object v) => completer.completeError(v));
       Isolate.spawn(_isolateTest, index,
           onExit: exitPort.sendPort, onError: errorPort.sendPort);
       return completer.future;

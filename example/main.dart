@@ -13,14 +13,14 @@ Future<dynamic> main() async {
   db.put("abc", "def");
 
   // Now get the key
-  String value = db.get("abc");
+  String? value = db.get("abc");
   print("value is $value"); // value2 is def
 
   // Delete the key
   db.delete("abc");
 
   // If a key does not exist we get null back
-  String value3 = db.get("abc");
+  String? value3 = db.get("abc");
   print("value3 is $value3"); // value3 is null
 
   // Now lets add a few key-value pairs

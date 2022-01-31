@@ -11,8 +11,6 @@ import 'dart:collection' show IterableBase;
 
 import 'dart-ext:leveldb';
 
-import 'package:meta/meta.dart' show required;
-
 /// Base class for all exceptions thrown by leveldb_dart.
 abstract class LevelError implements Exception {
   final String _msg;
@@ -40,6 +38,12 @@ class LevelCorruptionError extends LevelError {
 class LevelInvalidArgumentError extends LevelError {
   const LevelInvalidArgumentError._internal()
       : super._internal("Invalid argument");
+}
+
+/// Exception thrown if `LevelIterator.current` used outside of valid range.
+class LevelInvalidIterator extends LevelError {
+  const LevelInvalidIterator._internal()
+      : super._internal("Iterator used before or after range");
 }
 
 class _Uint8ListEncoder extends convert.Converter<List<int>, Uint8List> {
@@ -92,12 +96,12 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   void _open(bool shared, SendPort port, String path, int blockSize,
       bool createIfMissing, bool errorIfExists) native "DB_Open";
 
-  Uint8List _syncGet(Uint8List key) native "SyncGet";
+  Uint8List? _syncGet(Uint8List key) native "SyncGet";
   void _syncPut(Uint8List key, Uint8List value, bool sync) native "SyncPut";
   void _syncDelete(Uint8List key) native "SyncDelete";
   void _syncClose() native "SyncClose";
 
-  static LevelError _getError(dynamic reply) {
+  static LevelError? _getError(dynamic reply) {
     if (reply == -1) {
       return const LevelClosedError._internal();
     }
@@ -114,7 +118,7 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   }
 
   static bool _completeError(Completer<dynamic> completer, dynamic reply) {
-    LevelError e = _getError(reply);
+    LevelError? e = _getError(reply);
     if (e != null) {
       completer.completeError(e);
       return true;
@@ -185,10 +189,8 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
       int blockSize: 4096,
       bool createIfMissing: true,
       bool errorIfExists: false,
-      @required convert.Codec<K, Uint8List> keyEncoding,
-      @required convert.Codec<V, Uint8List> valueEncoding}) {
-    assert(keyEncoding != null);
-    assert(valueEncoding != null);
+      required convert.Codec<K, Uint8List> keyEncoding,
+      required convert.Codec<V, Uint8List> valueEncoding}) {
     Completer<LevelDB<K, V>> completer = new Completer<LevelDB<K, V>>();
     RawReceivePort replyPort = new RawReceivePort();
     LevelDB<K, V> db = new LevelDB<K, V>._internal(keyEncoding, valueEncoding);
@@ -211,10 +213,10 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   }
 
   /// Get a key in the database. Returns null if the key is not found.
-  V get(K key) {
+  V? get(K key) {
     Uint8List keyEnc = _keyEncoding.encode(key);
-    Uint8List value = _syncGet(keyEnc);
-    V ret;
+    Uint8List? value = _syncGet(keyEnc);
+    V? ret;
     if (value != null) {
       ret = _valueEncoding.decode(value);
     }
@@ -248,7 +250,7 @@ class LevelDB<K, V> extends NativeFieldWrapperClass2 {
   ///     getItems(gte: 'b', lt: 'd')
   ///
   LevelIterable<K, V> getItems(
-      {K gt, K gte, K lt, K lte, int limit: -1, bool fillCache: true}) {
+      {K? gt, K? gte, K? lt, K? lte, int limit: -1, bool fillCache: true}) {
     return new LevelIterable<K, V>._internal(this, limit, fillCache,
         gt == null ? gte : gt, gt == null, lt == null ? lte : lt, lt == null);
   }
@@ -274,28 +276,37 @@ class LevelIterator<K, V> extends NativeFieldWrapperClass2
       : _keyEncoding = it._db._keyEncoding,
         _valueEncoding = it._db._valueEncoding;
 
-  int _init(LevelDB<K, V> db, int limit, bool fillCache, Uint8List gt,
-      bool isGtClosed, Uint8List lt, bool isLtClosed) native "SyncIterator_New";
-  Uint8List _next() native "SyncIterator_Next";
-  Uint8List _current;
+  void _init(LevelDB<K, V> db, int limit, bool fillCache, Uint8List? gt,
+      bool isGtClosed, Uint8List? lt, bool isLtClosed) native "SyncIterator_New";
+  Uint8List? _next() native "SyncIterator_Next";
+  Uint8List? _current;
 
   /// The key of the current LevelItem
-  K get currentKey => _current == null
-      ? null
-      : _keyEncoding.decode(new Uint8List.view(
-          _current.buffer, 4, (_current[1] << 8) + _current[0]));
+  K get currentKey {
+    if (_current == null) {
+      throw LevelInvalidIterator._internal();
+    }
+    Uint8List current = _current!;
+    return _keyEncoding.decode(new Uint8List.view(
+          current.buffer, 4, (current[1] << 8) + current[0]));
+  }
 
   /// The value of the current LevelItem
-  V get currentValue => _current == null
-      ? null
-      : _valueEncoding.decode(new Uint8List.view(
-          _current.buffer, 4 + (_current[3] << 8) + _current[2]));
+  V get currentValue {
+    if (_current == null) {
+      throw LevelInvalidIterator._internal();
+    }
+    Uint8List current = _current!;
+    return _valueEncoding.decode(new Uint8List.view(
+          current.buffer, 4 + (current[3] << 8) + current[2]));
+  }
 
   @override
   LevelItem<K, V> get current {
-    return _current == null
-        ? null
-        : new LevelItem<K, V>._internal(currentKey, currentValue);
+    if (_current == null) {
+      throw LevelInvalidIterator._internal();
+    }
+    return LevelItem<K, V>._internal(currentKey!, currentValue!);
   }
 
   @override
@@ -317,14 +328,14 @@ class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
   final int _limit;
   final bool _fillCache;
 
-  final K _gt;
+  final K? _gt;
   final bool _isGtClosed;
 
-  final K _lt;
+  final K? _lt;
   final bool _isLtClosed;
 
-  LevelIterable._internal(LevelDB<K, V> db, int limit, bool fillCache, K gt,
-      bool isGtClosed, K lt, bool isLtClosed)
+  LevelIterable._internal(LevelDB<K, V> db, int limit, bool fillCache, K? gt,
+      bool isGtClosed, K? lt, bool isLtClosed)
       : _db = db,
         _limit = limit,
         _fillCache = fillCache,
@@ -336,13 +347,13 @@ class LevelIterable<K, V> extends IterableBase<LevelItem<K, V>> {
   @override
   LevelIterator<K, V> get iterator {
     LevelIterator<K, V> ret = new LevelIterator<K, V>._internal(this);
-    Uint8List ltEncoded;
+    Uint8List? ltEncoded;
     if (_lt != null) {
-      ltEncoded = _db._keyEncoding.encode(_lt);
+      ltEncoded = _db._keyEncoding.encode(_lt!);
     }
-    Uint8List gtEncoded;
+    Uint8List? gtEncoded;
     if (_gt != null) {
-      gtEncoded = _db._keyEncoding.encode(_gt);
+      gtEncoded = _db._keyEncoding.encode(_gt!);
     }
 
     ret._init(_db, _limit, _fillCache, gtEncoded, _isGtClosed, ltEncoded,
