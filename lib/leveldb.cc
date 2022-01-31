@@ -264,7 +264,7 @@ static void iteratorFinalize(NativeIterator *it_ref) {
 /**
  * Finalizer called when the dart LevelDB instance is not reachable.
  * */
-static void NativeDBFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+static void NativeDBFinalizer(void* isolate_callback_data, void* peer) {
     NativeDB* native_db = (NativeDB*) peer;
 
     // If the db reference is not NULL then the user did not call close on the db before it went out of scope.
@@ -295,7 +295,7 @@ Dart_Handle HandleError(Dart_Handle handle) {
 /**
  * Finalizer called when the dart instance is not reachable.
  * */
-static void NativeIteratorFinalizer(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+static void NativeIteratorFinalizer(void* isolate_callback_data, void* peer) {
   NativeIterator* it_ref = (NativeIterator*) peer;
   iteratorFinalize(it_ref);
   delete it_ref;
