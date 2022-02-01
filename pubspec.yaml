@@ -1,8 +1,7 @@
 name: leveldb
 description: Dart bindings for the LevelDB key value store. LevelDB is a fast key/value data store which
   supports arbitrary byte arrays as both keys and values.
-version: 6.0.2
-author: Adam Lofts <adam.lofts@gmail.com>
+version: 7.0.0
 homepage: https://github.com/adamlofts/leveldb_dart
 environment:
   sdk: '>=2.12.0 <2.15.0'

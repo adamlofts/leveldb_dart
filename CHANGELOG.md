@@ -1,5 +1,13 @@
 # Changelog
 
+## 7.0.0
+
+Breaking changes:
+
+- Dart null safety
+- Use leveldb 1.2.3
+- OSX support dropped
+
 ## 6.0.2
 
 Non-breaking changes:
